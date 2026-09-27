@@ -82,6 +82,11 @@ final class MuxDuplex implements Duplex
         return '' === $this->in && ($this->finished || $this->closed);
     }
 
+    public function pending(): bool
+    {
+        return '' !== $this->in;
+    }
+
     public function end(): void
     {
         if (!$this->closed) {

@@ -29,6 +29,9 @@ final class StreamDuplex implements Duplex
     public function __construct(private $stream, ?string $peer = null, private readonly ?\Closure $onClose = null)
     {
         \stream_set_blocking($stream, false);
+        // Without PHP's own read buffer, read($max) takes at most $max from the kernel, and
+        // pending() and eof() see what the kernel holds
+        \stream_set_read_buffer($stream, 0);
         $this->peer  = $peer ?? (string) @\stream_socket_get_name($stream, true);
         $this->local = (string) @\stream_socket_get_name($stream, false);
     }
@@ -91,7 +94,23 @@ final class StreamDuplex implements Duplex
 
     public function eof(): bool
     {
-        return $this->eof;
+        if (!$this->eof && !$this->closed) {
+            // A socket's end, without reading: a peek finds nothing to read and no more to come
+            $peek = @\stream_socket_recvfrom($this->stream, 1, \STREAM_PEEK);
+            $this->eof = false === $peek ? \feof($this->stream) : '' === $peek;
+        }
+
+        return $this->eof || $this->closed;
+    }
+
+    public function pending(): bool
+    {
+        if ($this->closed) {
+            return false;
+        }
+        $peek = @\stream_socket_recvfrom($this->stream, 1, \STREAM_PEEK);
+
+        return \is_string($peek) && '' !== $peek;
     }
 
     public function end(): void

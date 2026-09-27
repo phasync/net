@@ -62,7 +62,8 @@ final class Listener implements IteratorAggregate
             return true;
         });
         try {
-            $socket = \stream_socket_server(
+            $socket = 'tcp' === $protocol ? self::closeOnExec($address, $context) : null;
+            $socket ??= \stream_socket_server(
                 $address,
                 $errno,
                 $errstr,
@@ -111,9 +112,13 @@ final class Listener implements IteratorAggregate
             }
 
             // Can still fail when several processes share this socket (so_reuseport) and
-            // another one took the connection first.
+            // another one took the connection first; or for lack of file descriptors, while
+            // the connection keeps waiting: then wait a little instead of trying again at once
             $stream = @\stream_socket_accept($this->socket, 0, $peer);
             if (false === $stream) {
+                if ($this->hasPendingConnection()) {
+                    phasync::sleep(0.1);
+                }
                 continue;
             }
             \stream_set_blocking($stream, false);
@@ -172,6 +177,41 @@ final class Listener implements IteratorAggregate
     }
 
     /**
+     * Wait until a connection waits to be accepted, without accepting it.
+     *
+     * @throws IOException when the listener is closed
+     * @throws phasync\TimeoutException
+     */
+    public function awaitPending(float $timeout = \PHP_FLOAT_MAX): void
+    {
+        while (\is_resource($this->socket) && !$this->hasPendingConnection()) {
+            phasync::readable($this->socket, $timeout);
+        }
+        if (!\is_resource($this->socket)) {
+            throw new IOException('The listener is closed');
+        }
+    }
+
+    /**
+     * Stop listening, but hand out the connections already waiting in the kernel's queue first:
+     * accept() returns them, then throws IOException. The socket leaves its SO_REUSEPORT group
+     * at once, so the kernel gives new connections to the other listeners.
+     *
+     * @return list<array{0: resource, 1: string}> the connections that were waiting
+     */
+    public function drain(): array
+    {
+        $waiting = [];
+        while (\is_resource($this->socket) && $this->hasPendingConnection() && false !== ($stream = @\stream_socket_accept($this->socket, 0, $peer))) {
+            \stream_set_blocking($stream, false);
+            $waiting[] = [$stream, (string) $peer];
+        }
+        $this->close();
+
+        return $waiting;
+    }
+
+    /**
      * Whether a connection is waiting in the accept queue right now, without blocking.
      * Checking first avoids calling stream_socket_accept() on an empty queue, which always
      * emits a warning. Uses the phasync extension's stream_select() when loaded, since the
@@ -187,6 +227,45 @@ final class Listener implements IteratorAggregate
             : @\stream_select($read, $write, $except, 0, 0);
 
         return $ready > 0;
+    }
+
+    /**
+     * A close-on-exec TCP listener, so that processes the application starts (exec(),
+     * proc_open(), mail()) don't inherit it: an inherited listener stays in its SO_REUSEPORT
+     * group after this process ended, and the kernel keeps giving it connections nobody
+     * accepts. PHP's streams are never close-on-exec; the sockets extension's are with
+     * SOCK_CLOEXEC. Null when that is not available, or the context asks for more than
+     * backlog, so_reuseport and tcp_nodelay.
+     *
+     * @return resource|null
+     */
+    private static function closeOnExec(string $address, array $context): mixed
+    {
+        if (!\defined('SOCK_CLOEXEC') || \array_diff(\array_keys($context), ['socket']) || \array_diff(\array_keys($context['socket'] ?? []), ['backlog', 'so_reuseport', 'tcp_nodelay'])) {
+            return null;
+        }
+        if (!\preg_match('/^tcp:\/\/\[?(.*?)\]?:(\d+)$/D', $address, $m) || false === \filter_var($m[1], \FILTER_VALIDATE_IP) || (int) $m[2] > 65535) {
+            return null; // socket_bind() takes an IP address only: stream_socket_server() says what's wrong
+        }
+        $socket = \socket_create(\str_contains($m[1], ':') ? \AF_INET6 : \AF_INET, \SOCK_STREAM | \SOCK_CLOEXEC, \SOL_TCP);
+        if (false === $socket) {
+            return null;
+        }
+        // SO_REUSEADDR as stream_socket_server() sets it: connections in TIME_WAIT don't block a restart
+        if (!@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEADDR, 1)
+            || (($context['socket']['so_reuseport'] ?? false) && !@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEPORT, 1))
+            || !@\socket_bind($socket, $m[1], (int) $m[2]) || !@\socket_listen($socket, (int) ($context['socket']['backlog'] ?? 128))) {
+            $errno = \socket_last_error($socket);
+            \socket_close($socket);
+            throw new \RuntimeException("Failed to bind to $address: " . \socket_strerror($errno), $errno);
+        }
+        $stream = \socket_export_stream($socket);
+        if ($context['socket']['tcp_nodelay'] ?? false) {
+            // Read by stream_socket_accept() from the listener's context
+            \stream_context_set_option($stream, 'socket', 'tcp_nodelay', true);
+        }
+
+        return $stream;
     }
 
     private static function applyDefaultContext(array $context, string $protocol): array

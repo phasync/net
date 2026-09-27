@@ -32,6 +32,12 @@ final class Multiplexer
 
     private ?\Fiber $pump = null;
 
+    /** Still accepting; see stopListening(). */
+    private bool $listening = true;
+
+    /** Raised when accepting stops for lack of room (F). */
+    public readonly object $fullFlag;
+
     /** Accepting stopped (F): at max_connections, or accept() failed for lack of resources. */
     private bool $full = false;
 
@@ -61,6 +67,7 @@ final class Multiplexer
         $this->fp       = $fp;
         $this->address  = (string) \stream_socket_get_name($fp, false);
         $this->accepted = new \SplQueue();
+        $this->fullFlag = new \stdClass();
         $this->pump     = phasync::go($this->pump(...));
     }
 
@@ -77,7 +84,7 @@ final class Multiplexer
     public function accept(): MuxDuplex
     {
         while ($this->accepted->isEmpty()) {
-            if (null === $this->fp) {
+            if (null === $this->fp || !$this->listening) {
                 throw new IOException('The server is closed');
             }
             phasync::awaitFlag($this->accepted, \PHP_FLOAT_MAX);
@@ -97,6 +104,23 @@ final class Multiplexer
     {
         if (null !== $this->fp) {
             \fwrite($this->fp, $type . \pack('PV', $id, \strlen($payload)) . $payload);
+        }
+    }
+
+    /**
+     * Stop accepting: accept() hands out the connections accepted so far, then throws; open
+     * connections go on, and the server's stream is closed when the last one ended.
+     *
+     * The extension can't stop listening alone yet (phasync/phasync-ext#4): until it can, a
+     * connection that arrives after this is closed at once, and the listener stays in its
+     * SO_REUSEPORT group.
+     */
+    public function stopListening(): void
+    {
+        $this->listening = false;
+        phasync::raiseFlag($this->accepted);
+        if (!$this->connections) {
+            $this->close();
         }
     }
 
@@ -154,6 +178,10 @@ final class Multiplexer
                 ($this->connections[$id] ?? null)?->received($payload);
                 break;
             case 'C':
+                if (!$this->listening) {
+                    $this->send('X', $id); // see stopListening()
+                    break;
+                }
                 [$peer, $local]         = \explode("\0", $payload, 2) + ['', ''];
                 $connection             = new MuxDuplex($this, $id, $peer, $local);
                 $this->connections[$id] = $connection;
@@ -172,9 +200,13 @@ final class Multiplexer
             case 'X':
                 ($this->connections[$id] ?? null)?->gone();
                 unset($this->connections[$id]);
+                if (!$this->listening && !$this->connections) {
+                    $this->close();
+                }
                 break;
             case 'F':
                 $this->full = true;
+                phasync::raiseFlag($this->fullFlag);
                 break;
             case 'A':
                 $this->full = false;

@@ -37,8 +37,14 @@ interface Duplex
      */
     public function write(string $bytes, ?float $timeout = null): void;
 
-    /** Whether the peer has finished sending, and everything it sent was read. */
+    /**
+     * Whether the peer has finished sending, and everything it sent was read. Noticed without a
+     * read: a peer that closed its side is seen here while nothing is being read.
+     */
     public function eof(): bool;
+
+    /** Whether bytes the peer sent are waiting: read() would return them at once. */
+    public function pending(): bool;
 
     /** Finish our side: the peer reads the end after what was written; we can still read. */
     public function end(): void;

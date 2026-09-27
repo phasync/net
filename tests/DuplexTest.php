@@ -28,7 +28,7 @@ function with_server(Closure $handle, Closure $test, array $options = []): mixed
         try {
             return $test($server);
         } finally {
-            $server->close();
+            $server->shutdown();
         }
     });
 }
@@ -251,4 +251,57 @@ test('close() on the server ends the accept loop', function () {
 
         return phasync::await($loop);
     }))->toBe('ended');
+});
+
+test('pending() and eof() see what arrived without reading it', function () {
+    expect(with_server(function (Duplex $conn) {
+        phasync::sleep(0.05); // the client wrote and finished meanwhile
+        $seen = [$conn->pending(), $conn->eof(), $conn->read(), $conn->pending(), $conn->eof()];
+        $conn->write(json_encode($seen));
+        $conn->close();
+    }, function (Server $server) {
+        $client = client($server);
+        $client->write('x');
+        $client->end();
+
+        return json_decode(read_all($client));
+    }))->toBe([true, false, 'x', false, true]);
+});
+
+test('close() stops listening; open connections go on', function () use ($echo) {
+    expect(with_server($echo, function (Server $server) {
+        $client = client($server);
+        $client->write('before');
+        $first = $client->read(6, 5);
+        $server->close();
+        $client->write('after');
+
+        return [$first, $client->read(5, 5)];
+    }))->toBe(['before', 'after']);
+});
+
+test('awaitFull() returns once the server is at max_connections with a client waiting', function () {
+    expect(with_server(function (Duplex $conn) {
+        $conn->read(); // until the client closes
+        $conn->close();
+    }, function (Server $server) {
+        $full = phasync::go(function () use ($server) {
+            $server->awaitFull();
+
+            return 'full';
+        });
+        $a = client($server);
+        phasync::sleep(0.05);
+        $early = $full->isTerminated();
+        $b     = client($server); // waits in the backlog
+        $result = phasync::await($full, 3);
+        $a->close();
+        $b->close();
+
+        return [$early, $result];
+    }, ['max_connections' => 1]))->toBe([
+        // The extension reports full at the limit, before anyone waits (phasync/phasync-ext#4)
+        function_exists('phasync\ext\tcp_server'),
+        'full',
+    ]);
 });
