@@ -305,3 +305,47 @@ test('awaitFull() returns once the server is at max_connections with a client wa
         'full',
     ]);
 });
+
+test('close() while the accept loop waits: a connection that was queued is still handed out and served', function () use ($echo) {
+    expect(phasync::run(function () use ($echo) {
+        $server = serve('127.0.0.1:0');
+        phasync::go(function () use ($server, $echo) {
+            foreach ($server as $conn) {
+                phasync::go(fn () => $echo($conn));
+            }
+        });
+        phasync::sleep(0.01); // the loop waits for a connection
+        // A blocking connect doesn't yield: the connection is queued, the loop still waits
+        $client = new StreamDuplex(stream_socket_client('tcp://' . $server->addr()));
+        $server->close();
+        $client->write('queued');
+        $reply = $client->read(6, 2);
+        $client->close();
+        $server->shutdown();
+
+        return $reply;
+    }))->toBe('queued');
+});
+
+test('a client that stops reading makes writes wait, and time out', function () {
+    $outcome = null;
+    with_server(function (Duplex $conn) use (&$outcome) {
+        try {
+            for ($i = 0; $i < 200; ++$i) {
+                $conn->write(str_repeat('x', 1 << 20), 0.3); // 200 MiB in all: far past any buffer
+            }
+            $outcome = 'wrote everything';
+        } catch (TimeoutException) {
+            $outcome = 'timed out';
+        } finally {
+            $conn->close();
+        }
+    }, function (Server $server) use (&$outcome) {
+        $client   = client($server); // never reads
+        $deadline = microtime(true) + 10;
+        while (null === $outcome && microtime(true) < $deadline) {
+            phasync::sleep(0.05);
+        }
+    }, ['high_water' => 1 << 20]);
+    expect($outcome)->toBe('timed out');
+});

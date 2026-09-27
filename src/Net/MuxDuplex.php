@@ -11,7 +11,7 @@ use phasync\IOException;
  *
  * Reading is paused (the client's data stays in its socket) while more than PAUSE_AT bytes are
  * unread, and resumed when they are read. A write waits while the server reports the
- * connection's output backed up past its high_water (H), until it drained (W).
+ * connection's output backed up past its high_water (B), until it drained (W).
  *
  * @internal made by Multiplexer, used as a Duplex
  */
@@ -30,7 +30,7 @@ final class MuxDuplex implements Duplex
 
     private bool $paused = false;
 
-    /** Output backed up past high_water (H), until drained (W). */
+    /** Output backed up past high_water (B), until drained (W). */
     private bool $backlogged = false;
 
     private readonly object $readable;
@@ -136,7 +136,7 @@ final class MuxDuplex implements Duplex
         phasync::raiseFlag($this->readable);
     }
 
-    /** @internal Output backed up past high_water (H). */
+    /** @internal Output backed up past high_water (B). */
     public function backlogged(): void
     {
         $this->backlogged = true;

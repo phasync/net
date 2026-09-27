@@ -32,6 +32,12 @@ final class Multiplexer
 
     private ?\Fiber $pump = null;
 
+    /** Bytes written since frames were last collected, see send(). */
+    private int $unchecked = 0;
+
+    /** Frames are being handed out: collect() doesn't start again from a frame's handler. */
+    private bool $collecting = false;
+
     /** Still accepting; see stopListening(). */
     private bool $listening = true;
 
@@ -102,8 +108,17 @@ final class Multiplexer
     /** @internal A frame for the server: whole, so frames from coroutines never interleave. */
     public function send(string $type, int $id, string $payload = ''): void
     {
-        if (null !== $this->fp) {
-            \fwrite($this->fp, $type . \pack('PV', $id, \strlen($payload)) . $payload);
+        if (null === $this->fp) {
+            return;
+        }
+        \fwrite($this->fp, $type . \pack('PV', $id, \strlen($payload)) . $payload);
+        // A writer that never waits never lets the pump run: every 64 KiB, it collects the
+        // frames itself, so that a B (output backed up past high_water) for its connection is
+        // seen before it writes much more
+        $this->unchecked += \strlen($payload);
+        if ($this->unchecked >= 65536) {
+            $this->unchecked = 0;
+            $this->collect();
         }
     }
 
@@ -148,26 +163,37 @@ final class Multiplexer
         try {
             while (null !== $this->fp) {
                 phasync::readable($this->fp, \PHP_FLOAT_MAX);
-                if (null === $this->fp) {
-                    return;
-                }
-                $buffer = $this->carry . \fread($this->fp, 262144);
-                $length = \strlen($buffer);
-                $offset = 0;
-                while ($length - $offset >= 13) {
-                    ['type' => $type, 'id' => $id, 'len' => $len] = \unpack('atype/Pid/Vlen', $buffer, $offset);
-                    if ($length - $offset - 13 < $len) {
-                        break; // the rest comes with the next read
-                    }
-                    $this->frame($type, $id, $len > 0 ? \substr($buffer, $offset + 13, $len) : '');
-                    $offset += 13 + $len;
-                }
-                $this->carry = \substr($buffer, $offset);
+                $this->collect();
             }
         } catch (CancelledException) {
             // close()
         } catch (IOException) {
             // The stream was closed under us: close() ends the rest
+        }
+    }
+
+    /** Read the frames there are, without waiting, and hand them out. */
+    private function collect(): void
+    {
+        if ($this->collecting || null === $this->fp) {
+            return;
+        }
+        $this->collecting = true;
+        try {
+            $buffer = $this->carry . \fread($this->fp, 262144);
+            $length = \strlen($buffer);
+            $offset = 0;
+            while ($length - $offset >= 13) {
+                ['type' => $type, 'id' => $id, 'len' => $len] = \unpack('atype/Pid/Vlen', $buffer, $offset);
+                if ($length - $offset - 13 < $len) {
+                    break; // the rest comes with the next read
+                }
+                $this->frame($type, $id, $len > 0 ? \substr($buffer, $offset + 13, $len) : '');
+                $offset += 13 + $len;
+            }
+            $this->carry = \substr($buffer, $offset);
+        } finally {
+            $this->collecting = false;
         }
     }
 
@@ -191,7 +217,7 @@ final class Multiplexer
             case 'E':
                 ($this->connections[$id] ?? null)?->finished();
                 break;
-            case 'H':
+            case 'B':
                 ($this->connections[$id] ?? null)?->backlogged();
                 break;
             case 'W':

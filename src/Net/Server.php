@@ -48,6 +48,12 @@ final class Server implements IteratorAggregate
     /** @var \WeakMap<StreamDuplex, true> open connections, without the extension, for shutdown() */
     private \WeakMap $streams;
 
+    /** Without the extension: at max_connections with a client waiting, see awaitFull(). */
+    private bool $fullAndWaiting = false;
+
+    /** Raised when $fullAndWaiting becomes true. */
+    private readonly object $full;
+
     /**
      * @see serve()
      *
@@ -56,6 +62,7 @@ final class Server implements IteratorAggregate
     public function __construct(string $address, private readonly array $options = [])
     {
         $this->room    = new \stdClass();
+        $this->full    = new \stdClass();
         $this->streams = new \WeakMap();
         if (!\str_contains($address, '://')) {
             $address = 'tcp://' . $address;
@@ -88,21 +95,42 @@ final class Server implements IteratorAggregate
         if (null !== $this->mux) {
             return $this->mux->accept();
         }
-        if ($this->drained) {
-            [$stream, $peer] = \array_shift($this->drained);
+        while (true) {
+            if ($this->drained) {
+                [$stream, $peer] = \array_shift($this->drained);
 
-            return $this->adopt($stream, $peer);
-        }
-        $max = $this->options['max_connections'] ?? 0;
-        while ($max > 0 && $this->open >= $max && null !== $this->listener) {
-            \phasync::awaitFlag($this->room, \PHP_FLOAT_MAX); // new connections wait in the backlog
-        }
-        if (null === $this->listener) {
-            throw new IOException('The server is closed');
-        }
-        [$stream, $peer] = $this->listener->accept();
+                return $this->adopt($stream, $peer);
+            }
+            if (null === $this->listener) {
+                throw new IOException('The server is closed');
+            }
+            try {
+                $max = $this->options['max_connections'] ?? 0;
+                while ($max > 0 && $this->open >= $max && null !== $this->listener) {
+                    // New connections wait in the backlog. Only this coroutine waits on the
+                    // listener (phasync allows one waiter per stream): once a client waits while
+                    // there is no room, awaitFull() is told
+                    $this->listener->awaitPending();
+                    if ($this->open >= $max) {
+                        $this->fullAndWaiting = true;
+                        \phasync::raiseFlag($this->full);
+                        \phasync::awaitFlag($this->room, \PHP_FLOAT_MAX);
+                        $this->fullAndWaiting = false;
+                    }
+                }
+                if (null === $this->listener) {
+                    continue;
+                }
+                [$stream, $peer] = $this->listener->accept();
 
-        return $this->adopt($stream, $peer);
+                return $this->adopt($stream, $peer);
+            } catch (IOException $e) {
+                if (null !== $this->listener) {
+                    throw $e;
+                }
+                // close() while waiting: the connections it took from the queue come next
+            }
+        }
     }
 
     /**
@@ -123,17 +151,11 @@ final class Server implements IteratorAggregate
 
             return;
         }
-        while (true) {
-            while (!$this->isFull() && null !== $this->listener) {
-                \phasync::awaitFlag($this->room, \PHP_FLOAT_MAX);
-            }
+        while (!$this->fullAndWaiting) {
             if (null === $this->listener) {
                 throw new IOException('The server is closed');
             }
-            $this->listener->awaitPending();
-            if ($this->isFull()) {
-                return;
-            }
+            \phasync::awaitFlag($this->full, \PHP_FLOAT_MAX);
         }
     }
 
@@ -198,6 +220,7 @@ final class Server implements IteratorAggregate
             $this->listener = null;
         }
         \phasync::raiseFlag($this->room);
+        \phasync::raiseFlag($this->full);
     }
 
     /**
