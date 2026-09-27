@@ -22,6 +22,23 @@ function listen(string $address, array $context = []): Listener
 }
 
 /**
+ * Serve TCP (or Unix socket) connections as Duplex objects: see Server.
+ *
+ * @param string $address Such as '0.0.0.0:8080', '[::]:8080' or 'unix:///run/app.sock'. Port
+ *                        0 picks a free port; see Server::addr().
+ * @param array  $options backlog (65535, capped by the kernel), reuseport (true), nodelay
+ *                        (true), max_connections (0: no limit); with the phasync extension
+ *                        also read_chunk (bytes read per connection at a time) and high_water
+ *                        (output buffered per connection before writes wait)
+ *
+ * @throws \RuntimeException if the address cannot be bound
+ */
+function serve(string $address, array $options = []): Server
+{
+    return new Server($address, $options);
+}
+
+/**
  * Bind a UDP socket, like Go's net.ListenPacket().
  *
  * @param string $address Address to bind, such as '0.0.0.0:9000'. Port 0 picks a free port;
