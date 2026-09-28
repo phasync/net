@@ -2,7 +2,8 @@
 
 > Formerly `phasync/server`, which stays available for 1.x.
 
-TCP, UDP and Unix socket networking for PHP using phasync coroutines.
+TCP, UDP and Unix socket networking for PHP using phasync coroutines. MIT, no dependencies
+beyond phasync: [the Ennerd philosophy](PHILOSOPHY.md).
 
 The API follows Go's `net` package: `listen()` gives you a `Listener` that hands you
 connections, `dial()` connects, and `listenPacket()` gives you a UDP `PacketConn`. You start
