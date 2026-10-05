@@ -37,6 +37,9 @@ final class Listener implements IteratorAggregate
     /** @var resource|null */
     private $socket;
 
+    /** The listener as ext-sockets' object, when it was created with it: connections are accepted with it, see closeOnExec(). */
+    private ?\Socket $sock = null;
+
     private string $address;
 
     /** Path of the socket file for a unix:// listener, removed again on close(). */
@@ -62,7 +65,7 @@ final class Listener implements IteratorAggregate
             return true;
         });
         try {
-            $socket = 'tcp' === $protocol ? self::closeOnExec($address, $context) : null;
+            $socket = $this->closeOnExec($address, $protocol, $context);
             $socket ??= \stream_socket_server(
                 $address,
                 $errno,
@@ -114,16 +117,15 @@ final class Listener implements IteratorAggregate
             // Can still fail when several processes share this socket (so_reuseport) and
             // another one took the connection first; or for lack of file descriptors, while
             // the connection keeps waiting: then wait a little instead of trying again at once
-            $stream = @\stream_socket_accept($this->socket, 0, $peer);
+            $stream = $this->acceptNow($peer);
             if (false === $stream) {
                 if ($this->hasPendingConnection()) {
                     phasync::sleep(0.1);
                 }
                 continue;
             }
-            \stream_set_blocking($stream, false);
 
-            return [$stream, (string) $peer];
+            return [$stream, $peer];
         }
 
         throw new IOException('The listener is closed');
@@ -160,7 +162,7 @@ final class Listener implements IteratorAggregate
         if (\is_resource($this->socket)) {
             \fclose($this->socket);
         }
-        $this->socket = null;
+        $this->socket = $this->sock = null;
         if (null !== $this->unixPath && \file_exists($this->unixPath)) {
             @\unlink($this->unixPath);
         }
@@ -202,9 +204,8 @@ final class Listener implements IteratorAggregate
     public function drain(): array
     {
         $waiting = [];
-        while (\is_resource($this->socket) && $this->hasPendingConnection() && false !== ($stream = @\stream_socket_accept($this->socket, 0, $peer))) {
-            \stream_set_blocking($stream, false);
-            $waiting[] = [$stream, (string) $peer];
+        while (\is_resource($this->socket) && $this->hasPendingConnection() && false !== ($stream = $this->acceptNow($peer))) {
+            $waiting[] = [$stream, $peer];
         }
         $this->close();
 
@@ -230,40 +231,77 @@ final class Listener implements IteratorAggregate
     }
 
     /**
-     * A close-on-exec TCP listener, so that processes the application starts (exec(),
-     * proc_open(), mail()) don't inherit it: an inherited listener stays in its SO_REUSEPORT
+     * Take a connection from the queue, or false when there is none (or accepting failed).
+     * With ext-sockets, the connection is close-on-exec, see closeOnExec().
+     *
+     * @return resource|false a non-blocking stream
+     */
+    private function acceptNow(?string &$peer): mixed
+    {
+        if (null === $this->sock) {
+            $stream = @\stream_socket_accept($this->socket, 0, $peer);
+            if (false !== $stream) {
+                \stream_set_blocking($stream, false);
+            }
+            $peer = (string) $peer;
+
+            return $stream;
+        }
+        $accepted = @\socket_accept($this->sock);
+        if (false === $accepted) {
+            return false;
+        }
+        \socket_set_nonblock($accepted);
+        $peer = '';
+        if (null === $this->unixPath) {
+            \socket_getpeername($accepted, $ip, $port);
+            $peer = (\str_contains($ip, ':') ? "[$ip]" : $ip) . ":$port";
+        }
+
+        return \socket_export_stream($accepted);
+    }
+
+    /**
+     * A close-on-exec listener, so that processes the application starts (exec(), proc_open(),
+     * mail()) don't inherit it, nor the connections accepted from it (accepted with
+     * socket_accept(), see acceptNow()). An inherited TCP listener stays in its SO_REUSEPORT
      * group after this process ended, and the kernel keeps giving it connections nobody
-     * accepts. PHP's streams are never close-on-exec; the sockets extension's are with
-     * SOCK_CLOEXEC. Null when that is not available, or the context asks for more than
-     * backlog, so_reuseport and tcp_nodelay.
+     * accepts; an inherited connection stays open after we closed it. PHP's streams are never
+     * close-on-exec; the sockets extension's are with SOCK_CLOEXEC. Null when that is not
+     * available, or the context asks for more than backlog, so_reuseport and tcp_nodelay.
      *
      * @return resource|null
      */
-    private static function closeOnExec(string $address, array $context): mixed
+    private function closeOnExec(string $address, string $protocol, array $context): mixed
     {
         if (!\defined('SOCK_CLOEXEC') || \array_diff(\array_keys($context), ['socket']) || \array_diff(\array_keys($context['socket'] ?? []), ['backlog', 'so_reuseport', 'tcp_nodelay'])) {
             return null;
         }
-        if (!\preg_match('/^tcp:\/\/\[?(.*?)\]?:(\d+)$/D', $address, $m) || false === \filter_var($m[1], \FILTER_VALIDATE_IP) || (int) $m[2] > 65535) {
+        if ('unix' === $protocol) {
+            $host   = \substr($address, \strlen('unix://'));
+            $port   = 0;
+            $socket = \socket_create(\AF_UNIX, \SOCK_STREAM | \SOCK_CLOEXEC, 0);
+        } elseif ('tcp' === $protocol && \preg_match('/^tcp:\/\/\[?(.*?)\]?:(\d+)$/D', $address, $m) && false !== \filter_var($m[1], \FILTER_VALIDATE_IP) && (int) $m[2] <= 65535) {
+            [, $host, $port] = $m;
+            $socket          = \socket_create(\str_contains($host, ':') ? \AF_INET6 : \AF_INET, \SOCK_STREAM | \SOCK_CLOEXEC, \SOL_TCP);
+        } else {
             return null; // socket_bind() takes an IP address only: stream_socket_server() says what's wrong
         }
-        $socket = \socket_create(\str_contains($m[1], ':') ? \AF_INET6 : \AF_INET, \SOCK_STREAM | \SOCK_CLOEXEC, \SOL_TCP);
         if (false === $socket) {
             return null;
         }
         // SO_REUSEADDR as stream_socket_server() sets it: connections in TIME_WAIT don't block a restart
-        if (!@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEADDR, 1)
+        if ('unix' !== $protocol && (!@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEADDR, 1)
             || (($context['socket']['so_reuseport'] ?? false) && !@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEPORT, 1))
-            || !@\socket_bind($socket, $m[1], (int) $m[2]) || !@\socket_listen($socket, (int) ($context['socket']['backlog'] ?? 128))) {
+            // Linux gives the listener's TCP_NODELAY to the connections it accepts
+            || (($context['socket']['tcp_nodelay'] ?? false) && !@\socket_set_option($socket, \SOL_TCP, \TCP_NODELAY, 1)))
+            || !@\socket_bind($socket, $host, (int) $port) || !@\socket_listen($socket, (int) ($context['socket']['backlog'] ?? 128))) {
             $errno = \socket_last_error($socket);
             \socket_close($socket);
             throw new \RuntimeException("Failed to bind to $address: " . \socket_strerror($errno), $errno);
         }
-        $stream = \socket_export_stream($socket);
-        if ($context['socket']['tcp_nodelay'] ?? false) {
-            // Read by stream_socket_accept() from the listener's context
-            \stream_context_set_option($stream, 'socket', 'tcp_nodelay', true);
-        }
+        $stream     = \socket_export_stream($socket);
+        $this->sock = \socket_import_stream($stream);
 
         return $stream;
     }

@@ -59,6 +59,10 @@ from any coroutine). To take one connection at a time, as with Go's `Accept()`:
 Either way, a connection already waiting in the kernel's queue is taken without waiting for
 the event loop, so a burst of new connections is admitted at once.
 
+With ext-sockets, the listener and the connections it accepts are close-on-exec: processes your
+application starts (`exec()`, `proc_open()`) don't inherit them. When accepting fails for lack of
+file descriptors, `accept()` waits 0.1 s and retries, as long as the connection is still queued.
+
 ### Several addresses
 
 A listener listens on one address. For several, run one accept loop per address:

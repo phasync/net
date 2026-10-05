@@ -335,3 +335,25 @@ test('a client that stops reading makes writes wait, and time out', function () 
     });
     expect($outcome)->toBe('timed out');
 });
+
+test('close() while accept() waits and nothing is queued: accept() throws IOException, also when called again', function () {
+    $messages = phasync::run(function () {
+        $server  = serve('127.0.0.1:0');
+        $waiting = phasync::go(function () use ($server) {
+            try {
+                $server->accept();
+            } catch (IOException $e) {
+                return $e->getMessage();
+            }
+        });
+        phasync::sleep(0.01);
+        $server->close();
+        try {
+            $server->accept();
+        } catch (IOException $e) {
+            return [phasync::await($waiting), $e->getMessage()];
+        }
+    });
+
+    expect($messages)->toBe(['The server is closed', 'The server is closed']);
+});

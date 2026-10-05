@@ -252,3 +252,86 @@ test('accept() throws IOException on a closed listener, also in a coroutine alre
 
     expect($result)->toBe(['The listener is closed', 'The listener is closed']);
 });
+
+/** The soft and hard open-file limits as posix_setrlimit() takes them. */
+function nofile_limits(): array
+{
+    $r = posix_getrlimit();
+
+    return array_map(fn ($v) => 'unlimited' === $v ? POSIX_RLIM_INFINITY : (int) $v, [$r['soft openfiles'], $r['hard openfiles']]);
+}
+
+/** The socket file descriptors this process has open: number => close-on-exec. */
+function socket_fd_flags(): array
+{
+    $fds = [];
+    foreach (glob('/proc/self/fdinfo/*') as $info) {
+        $fd = '/proc/self/fd/' . basename($info); // glob()'s own, closed again, is gone by now
+        if (is_link($fd) && str_starts_with(readlink($fd), 'socket:')) {
+            preg_match('/^flags:\s+(\d+)/m', file_get_contents($info), $m);
+            $fds[basename($info)] = (bool) (octdec($m[1]) & 02000000); // O_CLOEXEC
+        }
+    }
+
+    return $fds;
+}
+
+test('the listener and the connections it accepts are close-on-exec, so processes the application starts do not inherit them', function (string $address) {
+    if (!is_dir('/proc/self/fdinfo') || !defined('SOCK_CLOEXEC')) {
+        $this->markTestSkipped('Needs Linux and ext-sockets');
+    }
+    $new = phasync::run(function () use ($address) {
+        $before   = socket_fd_flags();
+        $listener = phasync\Net\listen($address);
+        $client   = stream_socket_client(str_starts_with($address, 'unix:') ? $address : 'tcp://' . $listener->addr());
+        [$conn]   = $listener->accept();
+        $new      = array_diff_key(socket_fd_flags(), $before);
+        fclose($client);
+        fclose($conn);
+        $listener->close();
+
+        return $new;
+    });
+
+    // The listener and the accepted connection; the client, which PHP creates, is the one that is not
+    expect(array_count_values(array_map(intval(...), $new)))->toBe([1 => 2, 0 => 1]);
+})->with([
+    'tcp'  => ['127.0.0.1:0'],
+    'unix' => ['unix://' . sys_get_temp_dir() . '/phasync_cloexec.sock'],
+]);
+
+test('accept() backs off while there are no file descriptors, instead of retrying at once', function () {
+    [$soft, $hard] = nofile_limits();
+    $result        = phasync::run(function () use ($soft, $hard) {
+        $listener = phasync\Net\listen('127.0.0.1:0');
+        $client   = stream_socket_client('tcp://' . $listener->addr());
+        phasync::sleep(0.05); // the handshake finishes into the accept queue
+
+        // Use up the descriptors, up to a lowered limit
+        posix_setrlimit(POSIX_RLIMIT_NOFILE, (int) max(array_map('basename', glob('/proc/self/fd/*'))) + 3, $hard);
+        set_error_handler(fn () => true); // PHPUnit's would need to autoload a class
+        $filler = [];
+        while ($f = @fopen('/dev/null', 'r')) {
+            $filler[] = $f;
+        }
+
+        $accepting = phasync::go(fn () => $listener->accept());
+        phasync::sleep(0.3); // a listener that retried at once would never give this coroutine its turn
+        $stillWaiting = !$accepting->isTerminated();
+
+        foreach ($filler as $f) {
+            fclose($f);
+        }
+        posix_setrlimit(POSIX_RLIMIT_NOFILE, $soft, $hard);
+        restore_error_handler();
+        [$conn] = phasync::await($accepting, 3);
+        $result = [$stillWaiting, is_resource($conn)];
+        fclose($client);
+        fclose($conn);
+        $listener->close();
+
+        return $result;
+    });
+
+    expect($result)->toBe([true, true]);
+});
