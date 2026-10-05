@@ -8,7 +8,8 @@ use phasync;
 use phasync\IOException;
 
 /**
- * A listening TCP or Unix domain socket, like Go's net.Listener. Create one with listen().
+ * A listening TCP or Unix domain socket, like Go's net.Listener. Create one with listen(), or
+ * wrap a socket that is already listening with fromStream().
  *
  * One listener is one socket. To listen on several addresses, create one listener per
  * address and run each accept loop in its own coroutine; to handle all of them in one
@@ -42,8 +43,11 @@ final class Listener implements IteratorAggregate
 
     private string $address;
 
-    /** Path of the socket file for a unix:// listener, removed again on close(). */
+    /** Path of the socket file for a unix:// listener this listener created, removed again on close(). */
     private ?string $unixPath = null;
+
+    /** A Unix socket's clients have no address. */
+    private bool $unix = false;
 
     /**
      * @see listen()
@@ -83,9 +87,30 @@ final class Listener implements IteratorAggregate
         \stream_set_blocking($socket, false);
         $this->socket  = $socket;
         $this->address = (string) \stream_socket_get_name($socket, false);
-        if ('unix' === $protocol) {
+        if ($this->unix = 'unix' === $protocol) {
             $this->unixPath = \substr($address, \strlen('unix://'));
         }
+    }
+
+    /**
+     * Accept from a socket that is already listening and that this process did not create: one
+     * the application made before forking its workers, which all accept from it. The socket is
+     * made non-blocking. Whoever created it owns it: close() closes only this process's
+     * descriptor, and never removes a Unix socket's file. Options set on the socket, such as
+     * keepalive, are those it was created with.
+     *
+     * @param resource $stream a listening stream socket, TCP or Unix
+     */
+    public static function fromStream($stream): self
+    {
+        $listener = (new \ReflectionClass(self::class))->newInstanceWithoutConstructor();
+        \stream_set_blocking($stream, false);
+        $listener->socket  = $stream;
+        $listener->sock    = \function_exists('socket_import_stream') ? \socket_import_stream($stream) : null;
+        $listener->address = (string) \stream_socket_get_name($stream, false);
+        $listener->unix    = \str_starts_with(\stream_get_meta_data($stream)['stream_type'], 'unix');
+
+        return $listener;
     }
 
     /**
@@ -157,7 +182,7 @@ final class Listener implements IteratorAggregate
 
     /**
      * Stop listening. A coroutine waiting in accept() gets IOException, and a foreach loop
-     * over the listener ends. A Unix socket's file is removed.
+     * over the listener ends. The file of a Unix socket this listener created is removed.
      */
     public function close(): void
     {
@@ -255,7 +280,7 @@ final class Listener implements IteratorAggregate
         }
         \socket_set_nonblock($accepted);
         $peer = '';
-        if (null === $this->unixPath) {
+        if (!$this->unix) {
             \socket_getpeername($accepted, $ip, $port);
             $peer = (\str_contains($ip, ':') ? "[$ip]" : $ip) . ":$port";
         }
@@ -270,13 +295,13 @@ final class Listener implements IteratorAggregate
      * group after this process ended, and the kernel keeps giving it connections nobody
      * accepts; an inherited connection stays open after we closed it. PHP's streams are never
      * close-on-exec; the sockets extension's are with SOCK_CLOEXEC. Null when that is not
-     * available, or the context asks for more than backlog, so_reuseport and tcp_nodelay.
+     * available, or the context asks for more than backlog, so_reuseport, tcp_nodelay and keepalive.
      *
      * @return resource|null
      */
     private function closeOnExec(string $address, string $protocol, array $context): mixed
     {
-        if (!\defined('SOCK_CLOEXEC') || \array_diff(\array_keys($context), ['socket']) || \array_diff(\array_keys($context['socket'] ?? []), ['backlog', 'so_reuseport', 'tcp_nodelay'])) {
+        if (!\defined('SOCK_CLOEXEC') || \array_diff(\array_keys($context), ['socket']) || \array_diff(\array_keys($context['socket'] ?? []), ['backlog', 'so_reuseport', 'tcp_nodelay', 'keepalive'])) {
             return null;
         }
         if ('unix' === $protocol) {
@@ -296,7 +321,11 @@ final class Listener implements IteratorAggregate
         if ('unix' !== $protocol && (!@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEADDR, 1)
             || (($context['socket']['so_reuseport'] ?? false) && !@\socket_set_option($socket, \SOL_SOCKET, \SO_REUSEPORT, 1))
             // Linux gives the listener's TCP_NODELAY to the connections it accepts
-            || (($context['socket']['tcp_nodelay'] ?? false) && !@\socket_set_option($socket, \SOL_TCP, \TCP_NODELAY, 1)))
+            || (($context['socket']['tcp_nodelay'] ?? false) && !@\socket_set_option($socket, \SOL_TCP, \TCP_NODELAY, 1))
+            // so does its keepalive: first probe after $keepalive seconds idle, then every $keepalive, dropped after 9 unanswered
+            || (($keepalive = (int) ($context['socket']['keepalive'] ?? 0)) > 0
+                && !(@\socket_set_option($socket, \SOL_SOCKET, \SO_KEEPALIVE, 1) && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPIDLE, $keepalive)
+                    && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPINTVL, $keepalive) && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPCNT, 9))))
             || !@\socket_bind($socket, $host, (int) $port) || !@\socket_listen($socket, (int) ($context['socket']['backlog'] ?? 128))) {
             $errno = \socket_last_error($socket);
             \socket_close($socket);
@@ -314,10 +343,11 @@ final class Listener implements IteratorAggregate
 
         if ('unix' === $protocol) {
             // Unix sockets don't support these options
-            unset($context['socket']['so_reuseport'], $context['socket']['tcp_nodelay']);
+            unset($context['socket']['so_reuseport'], $context['socket']['tcp_nodelay'], $context['socket']['keepalive']);
         } else {
             $context['socket']['so_reuseport'] ??= true;
             $context['socket']['tcp_nodelay']  ??= true;
+            $context['socket']['keepalive']    ??= 15;
         }
 
         return $context;

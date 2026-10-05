@@ -12,7 +12,10 @@ use phasync;
  *                        Listener::addr().
  * @param array  $context Stream context options. Defaults: backlog 65535 (the kernel caps
  *                        it at its own limit, net.core.somaxconn on Linux), and for TCP
- *                        so_reuseport and tcp_nodelay enabled.
+ *                        so_reuseport and tcp_nodelay enabled. The extra socket option keepalive
+ *                        (seconds, default 15; 0 or false: off) sets TCP keepalive on the
+ *                        accepted connections, as Go does; it needs ext-sockets and is
+ *                        otherwise not applied.
  *
  * @throws \RuntimeException if the address cannot be bound
  */
@@ -24,14 +27,16 @@ function listen(string $address, array $context = []): Listener
 /**
  * Serve TCP (or Unix socket) connections as Duplex objects: see Server.
  *
- * @param string $address Such as '0.0.0.0:8080', '[::]:8080' or 'unix:///run/app.sock'. Port
- *                        0 picks a free port; see Server::addr().
- * @param array  $options backlog (65535, capped by the kernel), reuseport (true), nodelay
- *                        (true), max_connections (0: no limit)
+ * @param string|Listener $address Such as '0.0.0.0:8080', '[::]:8080' or 'unix:///run/app.sock'
+ *                                 (port 0 picks a free port; see Server::addr()), or a Listener
+ *                                 to serve, such as Listener::fromStream($socket)
+ * @param array           $options backlog (65535, capped by the kernel), reuseport (true), nodelay
+ *                                 (true), keepalive (15 seconds; 0 or false: off), max_connections
+ *                                 (0: no limit). Not used with a Listener, except max_connections.
  *
  * @throws \RuntimeException if the address cannot be bound
  */
-function serve(string $address, array $options = []): Server
+function serve(string|Listener $address, array $options = []): Server
 {
     return new Server($address, $options);
 }

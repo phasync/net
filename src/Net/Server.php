@@ -48,15 +48,24 @@ final class Server implements IteratorAggregate
     private readonly object $full;
 
     /**
+     * @param string|Listener $address an address to listen on, or a Listener to serve (such as
+     *                                 Listener::fromStream()), which is then not given the
+     *                                 backlog, reuseport, nodelay and keepalive options
+     *
      * @see serve()
      *
      * @throws \RuntimeException if the address cannot be bound
      */
-    public function __construct(string $address, private readonly array $options = [])
+    public function __construct(string|Listener $address, private readonly array $options = [])
     {
         $this->room    = new \stdClass();
         $this->full    = new \stdClass();
         $this->streams = new \WeakMap();
+        if ($address instanceof Listener) {
+            $this->listener = $address;
+
+            return;
+        }
         if (!\str_contains($address, '://')) {
             $address = 'tcp://' . $address;
         }
@@ -64,6 +73,7 @@ final class Server implements IteratorAggregate
             'backlog'      => $options['backlog'] ?? 65535,
             'so_reuseport' => $options['reuseport'] ?? true,
             'tcp_nodelay'  => $options['nodelay'] ?? true,
+            'keepalive'    => $options['keepalive'] ?? 15,
         ]]);
     }
 

@@ -110,6 +110,27 @@ $listener = listen('unix:///run/myapp.sock');
 
 `close()` removes the socket file, so the path can be bound again after a restart.
 
+To accept from a socket that another process made listening (an application that creates the
+socket, then forks workers that all accept from it), wrap it with `Listener::fromStream()`.
+Creating the socket stays with the application; `close()` then closes only this process's
+descriptor and leaves the file alone. A `Server` takes the listener too: `serve(Listener::fromStream($stream))`.
+
+```php
+$listener = Listener::fromStream($stream); // a listening stream socket, made non-blocking
+```
+
+### Keepalive
+
+Accepted TCP connections get TCP keepalive, as in Go: a first probe after 15 s idle, then every
+15 s, dropped after 9 unanswered, so a peer that vanished without closing is noticed. Set the
+seconds with the `keepalive` socket option (`serve()`: the `keepalive` option); `0` or `false`
+turns it off. It needs ext-sockets (PHP's stream contexts don't apply keepalive to accepted
+sockets) and is silently not applied without it.
+
+```php
+listen('0.0.0.0:8080', ['socket' => ['keepalive' => 30]]);
+```
+
 ### Port 0
 
 Listening on port 0 picks a free port; `addr()` returns the real one:
@@ -128,6 +149,7 @@ $listener->accept(?string &$peer = null)      // connection; $peer is set to its
 foreach ($listener as $peer => $conn)         // until the listener is closed
 $listener->close(): void
 $listener->addr(): string
+Listener::fromStream($stream): Listener       // wrap a listening socket another process created
 ```
 
 ## Serving connections: `serve()` and `Duplex`
@@ -161,7 +183,7 @@ phasync::run(function () {
 | `peer()`, `local()` | The two ends' addresses |
 
 `serve()` options: `backlog`, `reuseport` (default true), `nodelay` (default true),
-`max_connections` (new connections wait in the kernel's backlog meanwhile; `isFull()`). A slow
+`keepalive` (seconds, default 15; `0` turns it off), `max_connections` (new connections wait in the kernel's backlog meanwhile; `isFull()`). A slow
 reader pauses its client: data it hasn't read stays in the client's socket.
 
 `new StreamDuplex($stream)` makes any stream resource a `Duplex`, such as a `dial()` connection.

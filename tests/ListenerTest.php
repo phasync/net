@@ -335,3 +335,60 @@ test('accept() backs off while there are no file descriptors, instead of retryin
 
     expect($result)->toBe([true, true]);
 });
+
+/** The keepalive options of a connection: SO_KEEPALIVE, and idle, interval and count when it is on. */
+function keepalive_of($stream): array
+{
+    $sock = socket_import_stream($stream);
+    $on   = (bool) socket_get_option($sock, SOL_SOCKET, SO_KEEPALIVE);
+
+    return $on ? [true, ...array_map(fn ($o) => socket_get_option($sock, SOL_TCP, $o), [TCP_KEEPIDLE, TCP_KEEPINTVL, TCP_KEEPCNT])] : [false];
+}
+
+test('accepted TCP connections have keepalive set as in Go (15 s idle, 15 s interval, 9 probes) unless it is switched off', function (array $context, array $expected) {
+    if (!extension_loaded('sockets')) {
+        $this->markTestSkipped('Needs ext-sockets');
+    }
+    $result = phasync::run(function () use ($context) {
+        $listener = phasync\Net\listen('127.0.0.1:0', $context);
+        $client   = stream_socket_client('tcp://' . $listener->addr());
+        $conn     = $listener->accept();
+        $result   = keepalive_of($conn);
+        fclose($client);
+        fclose($conn);
+        $listener->close();
+
+        return $result;
+    });
+
+    expect($result)->toBe($expected);
+})->with([
+    'default'  => [[], [true, 15, 15, 9]],
+    '30 s'     => [['socket' => ['keepalive' => 30]], [true, 30, 30, 9]],
+    'zero'     => [['socket' => ['keepalive' => 0]], [false]],
+    'false'    => [['socket' => ['keepalive' => false]], [false]],
+]);
+
+test('the Server option keepalive reaches the listener', function (array $options, array $expected) {
+    if (!extension_loaded('sockets')) {
+        $this->markTestSkipped('Needs ext-sockets');
+    }
+    $result = phasync::run(function () use ($options) {
+        $server = phasync\Net\serve('127.0.0.1:0', $options);
+        $client = stream_socket_client('tcp://' . $server->addr());
+        $conn   = $server->accept();
+        $stream = (new ReflectionProperty($conn, 'stream'))->getValue($conn);
+        $result = keepalive_of($stream);
+        fclose($client);
+        $conn->close();
+        $server->close();
+
+        return $result;
+    });
+
+    expect($result)->toBe($expected);
+})->with([
+    'default' => [[], [true, 15, 15, 9]],
+    '20 s'    => [['keepalive' => 20], [true, 20, 20, 9]],
+    'off'     => [['keepalive' => 0], [false]],
+]);
