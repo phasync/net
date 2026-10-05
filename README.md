@@ -53,7 +53,7 @@ an empty read. This is also the fastest pattern for a server, with or without
 from any coroutine). To take one connection at a time, as with Go's `Accept()`:
 
 ```php
-[$conn, $peer] = $listener->accept();
+$conn = $listener->accept($peer); // like stream_socket_accept(): $peer is optional
 ```
 
 Either way, a connection already waiting in the kernel's queue is taken without waiting for
@@ -124,7 +124,7 @@ echo $listener->addr(); // 127.0.0.1:43127
 ```php
 phasync\Net\listen(string $address, array $context = []): Listener
 
-$listener->accept(): array{resource, string}  // [connection, peer]; IOException once closed
+$listener->accept(?string &$peer = null)      // connection; $peer is set to its address; IOException once closed
 foreach ($listener as $peer => $conn)         // until the listener is closed
 $listener->close(): void
 $listener->addr(): string

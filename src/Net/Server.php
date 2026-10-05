@@ -100,7 +100,7 @@ final class Server implements IteratorAggregate
                 if (null === $this->listener) {
                     continue;
                 }
-                [$stream, $peer] = $this->listener->accept();
+                $stream = $this->listener->accept($peer);
 
                 return $this->adopt($stream, $peer);
             } catch (IOException $e) {

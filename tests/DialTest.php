@@ -79,7 +79,7 @@ test('dial() resolves a host name', function () {
         $listener = phasync\Net\listen('127.0.0.1:0');
         $port     = substr($listener->addr(), strrpos($listener->addr(), ':') + 1);
         phasync::go(function () use ($listener) {
-            [$conn] = $listener->accept();
+            $conn = $listener->accept();
             fwrite(phasync::writable($conn), 'hello');
             fclose($conn);
             $listener->close();

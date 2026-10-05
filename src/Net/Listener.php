@@ -93,11 +93,13 @@ final class Listener implements IteratorAggregate
      * already waiting in the kernel's queue is returned without waiting for the event loop,
      * so a burst of connections is admitted at once.
      *
-     * @return array{0: resource, 1: string} the connection stream and the peer address
+     * @param string|null $peer set to the peer address, like stream_socket_accept()
+     *
+     * @return resource the connection stream
      *
      * @throws IOException when the listener is closed, also while waiting
      */
-    public function accept(): array
+    public function accept(?string &$peer = null)
     {
         while (\is_resource($this->socket)) {
             if (!$this->hasPendingConnection()) {
@@ -125,7 +127,7 @@ final class Listener implements IteratorAggregate
                 continue;
             }
 
-            return [$stream, $peer];
+            return $stream;
         }
 
         throw new IOException('The listener is closed');
@@ -141,7 +143,7 @@ final class Listener implements IteratorAggregate
     {
         while (\is_resource($this->socket)) {
             try {
-                [$stream, $peer] = $this->accept();
+                $stream = $this->accept($peer);
             } catch (IOException $e) {
                 if (\is_resource($this->socket)) {
                     throw $e;

@@ -211,7 +211,7 @@ test('accept() returns one connection and its peer address at a time, like Go', 
     $result = phasync::run(function () {
         $listener = phasync\Net\listen('127.0.0.1:0');
         $client   = stream_socket_client('tcp://' . $listener->addr());
-        [$conn, $peer] = $listener->accept();
+        $conn     = $listener->accept($peer);
         fwrite($client, 'ping');
         $data = fread(phasync::readable($conn), 10);
         fclose($conn);
@@ -284,7 +284,7 @@ test('the listener and the connections it accepts are close-on-exec, so processe
         $before   = socket_fd_flags();
         $listener = phasync\Net\listen($address);
         $client   = stream_socket_client(str_starts_with($address, 'unix:') ? $address : 'tcp://' . $listener->addr());
-        [$conn]   = $listener->accept();
+        $conn     = $listener->accept();
         $new      = array_diff_key(socket_fd_flags(), $before);
         fclose($client);
         fclose($conn);
@@ -324,7 +324,7 @@ test('accept() backs off while there are no file descriptors, instead of retryin
         }
         posix_setrlimit(POSIX_RLIMIT_NOFILE, $soft, $hard);
         restore_error_handler();
-        [$conn] = phasync::await($accepting, 3);
+        $conn   = phasync::await($accepting, 3);
         $result = [$stillWaiting, is_resource($conn)];
         fclose($client);
         fclose($conn);
