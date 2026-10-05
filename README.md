@@ -147,12 +147,6 @@ phasync::run(function () {
 });
 ```
 
-With the [phasync extension](#the-phasync-extension)'s `tcp_server()`, a TCP server is **one
-stream** for the listening socket and all its connections: the event loop waits on one file
-descriptor however many connections are open, and one read collects new connections and data
-from many clients. Without it (and for Unix sockets) each connection is a socket of its own.
-Connections behave the same either way; `Server::isMultiplexed()` says which it is.
-
 | `Duplex` | |
 |---|---|
 | `read(int $max = 65536, ?float $timeout = null): string` | The next bytes, waiting for them; `''` only at the end (the peer finished, or the connection closed) |
@@ -163,9 +157,8 @@ Connections behave the same either way; `Server::isMultiplexed()` says which it 
 | `peer()`, `local()` | The two ends' addresses |
 
 `serve()` options: `backlog`, `reuseport` (default true), `nodelay` (default true),
-`max_connections` (new connections wait in the kernel's backlog meanwhile; `isFull()`), and with
-the extension `read_chunk` and `high_water`. A slow reader pauses its client: data it hasn't read
-stays in the client's socket.
+`max_connections` (new connections wait in the kernel's backlog meanwhile; `isFull()`). A slow
+reader pauses its client: data it hasn't read stays in the client's socket.
 
 `new StreamDuplex($stream)` makes any stream resource a `Duplex`, such as a `dial()` connection.
 

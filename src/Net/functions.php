@@ -27,9 +27,7 @@ function listen(string $address, array $context = []): Listener
  * @param string $address Such as '0.0.0.0:8080', '[::]:8080' or 'unix:///run/app.sock'. Port
  *                        0 picks a free port; see Server::addr().
  * @param array  $options backlog (65535, capped by the kernel), reuseport (true), nodelay
- *                        (true), max_connections (0: no limit); with the phasync extension
- *                        also read_chunk (bytes read per connection at a time) and high_water
- *                        (output buffered per connection before writes wait)
+ *                        (true), max_connections (0: no limit)
  *
  * @throws \RuntimeException if the address cannot be bound
  */

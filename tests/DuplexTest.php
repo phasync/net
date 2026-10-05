@@ -1,9 +1,7 @@
 <?php
 
 /*
- * Server and Duplex. The same tests run with the phasync extension (the server multiplexes
- * connections through tcp_server()) and without it (a socket per connection): connections must
- * behave the same. Clients are StreamDuplex over dial().
+ * Server and Duplex. Clients are StreamDuplex over dial().
  */
 
 use phasync\IOException;
@@ -55,14 +53,6 @@ $echo = static function (Duplex $conn) {
     }
     $conn->close();
 };
-
-test('the server multiplexes through tcp_server() exactly when the extension has it', function () {
-    phasync::run(function () {
-        $server = serve('127.0.0.1:0');
-        expect($server->isMultiplexed())->toBe(function_exists('phasync\ext\tcp_server'));
-        $server->close();
-    });
-});
 
 test('echo: what a client writes comes back', function () use ($echo) {
     expect(with_server($echo, function (Server $server) {
@@ -299,11 +289,7 @@ test('awaitFull() returns once the server is at max_connections with a client wa
         $b->close();
 
         return [$early, $result];
-    }, ['max_connections' => 1]))->toBe([
-        // The extension reports full at the limit, before anyone waits (phasync/phasync-ext#4)
-        function_exists('phasync\ext\tcp_server'),
-        'full',
-    ]);
+    }, ['max_connections' => 1]))->toBe([false, 'full']);
 });
 
 test('close() while the accept loop waits: a connection that was queued is still handed out and served', function () use ($echo) {
@@ -346,6 +332,6 @@ test('a client that stops reading makes writes wait, and time out', function () 
         while (null === $outcome && microtime(true) < $deadline) {
             phasync::sleep(0.05);
         }
-    }, ['high_water' => 1 << 20]);
+    });
     expect($outcome)->toBe('timed out');
 });

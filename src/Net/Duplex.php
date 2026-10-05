@@ -9,9 +9,9 @@ use phasync\TimeoutException;
  * A full-duplex byte connection, such as a TCP connection: what a Server hands out, and what a
  * protocol (HTTP, a WebSocket) reads and writes, without knowing how the bytes travel.
  *
- * Reads and writes wait in the event loop, never blocking other coroutines, and behave the same
- * whether the connection is a socket of its own (StreamDuplex) or one of many multiplexed
- * through the phasync extension's tcp_server().
+ * Reads and writes wait in the event loop, never blocking other coroutines. A Server's
+ * connections are StreamDuplex objects; the interface lets protocol code stay independent of
+ * how the bytes travel.
  */
 interface Duplex
 {

@@ -7,13 +7,8 @@ use IteratorAggregate;
 use phasync\IOException;
 
 /**
- * A TCP (or Unix socket) server that hands out Duplex connections. Create one with serve().
- *
- * With the phasync extension's tcp_server(), a TCP server is one stream for the listening
- * socket and every connection: the event loop waits on one file descriptor however many
- * connections are open, and one read collects new connections and data from many clients.
- * Without it (and for Unix sockets), each connection is a socket of its own (a StreamDuplex).
- * Connections behave the same either way.
+ * A TCP (or Unix socket) server that hands out Duplex connections, each a socket of its own
+ * (a StreamDuplex). Create one with serve().
  *
  * ```php
  * phasync::run(function () {
@@ -32,23 +27,21 @@ use phasync\IOException;
  */
 final class Server implements IteratorAggregate
 {
-    private ?Multiplexer $mux = null;
-
     private ?Listener $listener = null;
 
-    /** Open connections, without the extension, for max_connections. */
+    /** Open connections, for max_connections. */
     private int $open = 0;
 
-    /** Raised when a connection opens or closes, without the extension. */
+    /** Raised when a connection opens or closes. */
     private readonly object $room;
 
-    /** @var list<array{0: resource, 1: string}> connections waiting when close() was called, without the extension */
+    /** @var list<array{0: resource, 1: string}> connections waiting when close() was called */
     private array $drained = [];
 
-    /** @var \WeakMap<StreamDuplex, true> open connections, without the extension, for shutdown() */
+    /** @var \WeakMap<StreamDuplex, true> open connections, for shutdown() */
     private \WeakMap $streams;
 
-    /** Without the extension: at max_connections with a client waiting, see awaitFull(). */
+    /** At max_connections with a client waiting, see awaitFull(). */
     private bool $fullAndWaiting = false;
 
     /** Raised when $fullAndWaiting becomes true. */
@@ -67,17 +60,6 @@ final class Server implements IteratorAggregate
         if (!\str_contains($address, '://')) {
             $address = 'tcp://' . $address;
         }
-        if (\str_starts_with($address, 'tcp://') && \function_exists('phasync\ext\tcp_server')) {
-            $parts     = \parse_url($address);
-            $this->mux = new Multiplexer(\trim($parts['host'] ?? '', '[]'), (int) ($parts['port'] ?? 0), [
-                'backlog'         => $options['backlog'] ?? 65535,
-                'reuseport'       => $options['reuseport'] ?? true,
-                'nodelay'         => $options['nodelay'] ?? true,
-                'max_connections' => $options['max_connections'] ?? 0,
-            ] + \array_intersect_key($options, ['read_chunk' => true, 'high_water' => true]));
-
-            return;
-        }
         $this->listener = new Listener($address, ['socket' => [
             'backlog'      => $options['backlog'] ?? 65535,
             'so_reuseport' => $options['reuseport'] ?? true,
@@ -92,9 +74,6 @@ final class Server implements IteratorAggregate
      */
     public function accept(): Duplex
     {
-        if (null !== $this->mux) {
-            return $this->mux->accept();
-        }
         while (true) {
             if ($this->drained) {
                 [$stream, $peer] = \array_shift($this->drained);
@@ -134,23 +113,15 @@ final class Server implements IteratorAggregate
     }
 
     /**
-     * Wait until the server is full with a client waiting to be accepted: at max_connections,
-     * or (with the extension) accepting failed for lack of resources. A server can make room
-     * then, closing a connection that only waits on its client, as nginx does with its idle
-     * keep-alive connections. (With the extension, "a client waiting" is not known: only that
-     * accepting stopped.)
+     * Wait until the server is at max_connections with a client waiting to be accepted. A
+     * server can make room then, closing a connection that only waits on its client, as nginx
+     * does with its idle keep-alive connections. Returns at once while it stays full, so wait
+     * for room (a connection closing) before calling it again.
      *
      * @throws IOException when the server is closed, also while waiting
      */
     public function awaitFull(): void
     {
-        if (null !== $this->mux) {
-            while (!$this->mux->isFull()) {
-                \phasync::awaitFlag($this->mux->fullFlag, \PHP_FLOAT_MAX);
-            }
-
-            return;
-        }
         while (!$this->fullAndWaiting) {
             if (null === $this->listener) {
                 throw new IOException('The server is closed');
@@ -192,15 +163,9 @@ final class Server implements IteratorAggregate
         }
     }
 
-    /**
-     * Whether accepting stopped: at max_connections, or (with the extension) accept() failing
-     * for lack of resources. New connections wait in the kernel's backlog meanwhile.
-     */
+    /** Whether accepting stopped, at max_connections. New connections wait in the kernel's backlog meanwhile. */
     public function isFull(): bool
     {
-        if (null !== $this->mux) {
-            return $this->mux->isFull();
-        }
         $max = $this->options['max_connections'] ?? 0;
 
         return $max > 0 && $this->open >= $max;
@@ -214,7 +179,6 @@ final class Server implements IteratorAggregate
      */
     public function close(): void
     {
-        $this->mux?->stopListening();
         if (null !== $this->listener) {
             $this->drained  = $this->listener->drain();
             $this->listener = null;
@@ -225,13 +189,10 @@ final class Server implements IteratorAggregate
 
     /**
      * Stop listening and close every connection now; reads and writes waiting on them end.
-     * With the extension, the server's stream closes; without it, the last connection's close
-     * ends it all the same.
      */
     public function shutdown(): void
     {
         $this->close();
-        $this->mux?->close();
         foreach ($this->drained as [$stream]) {
             \fclose($stream);
         }
@@ -244,12 +205,6 @@ final class Server implements IteratorAggregate
     /** The address the server is bound to, with the real port when it listened on port 0. */
     public function addr(): string
     {
-        return null !== $this->mux ? $this->mux->address() : (string) $this->listener?->addr();
-    }
-
-    /** Whether connections are multiplexed through the phasync extension's tcp_server(). */
-    public function isMultiplexed(): bool
-    {
-        return null !== $this->mux;
+        return (string) $this->listener?->addr();
     }
 }
