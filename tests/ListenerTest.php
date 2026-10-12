@@ -99,6 +99,50 @@ test('Listener takes connections already waiting in the queue without suspending
     expect($result)->toBe([20, 0]);
 });
 
+test('Listener lets the event loop run after every ACCEPT_BURST connections taken from a queue that does not empty', function () {
+    // Clients that keep connecting would otherwise keep accept() from ever waiting, and the
+    // other coroutines (the connections' own) from ever running.
+    $n      = 2 * phasync\Net\Listener::ACCEPT_BURST + 10;
+    $result = phasync::run(function () use ($n) {
+        $server  = phasync\Net\listen('127.0.0.1:0', ['socket' => ['backlog' => 1024]]);
+        $clients = [];
+        for ($i = 0; $i < $n; ++$i) {
+            $clients[] = stream_socket_client('tcp://' . $server->addr());
+        }
+        phasync::sleep(0.05); // let the kernel finish the handshakes into the accept queue
+
+        $turns   = 0;
+        $stop    = false;
+        $sibling = phasync::go(function () use (&$turns, &$stop) {
+            while (!$stop) {
+                ++$turns;
+                phasync::sleep(0);
+            }
+        });
+
+        $before   = $turns;
+        $accepted = [];
+        foreach ($server as $stream) {
+            $accepted[] = $stream;
+            if ($n === count($accepted)) {
+                break;
+            }
+        }
+        $siblingTurns = $turns - $before;
+
+        $stop = true;
+        phasync::await($sibling);
+        foreach (array_merge($clients, $accepted) as $s) {
+            fclose($s);
+        }
+        $server->close();
+
+        return [count($accepted), $siblingTurns];
+    });
+
+    expect($result)->toBe([$n, 2]);
+});
+
 test('closing the listener ends a waiting foreach loop without an exception', function () {
     $result = phasync::run(function () {
         $server = phasync\Net\listen('127.0.0.1:0');

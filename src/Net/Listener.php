@@ -35,6 +35,13 @@ use phasync\IOException;
  */
 final class Listener implements IteratorAggregate
 {
+    /**
+     * Connections accepted from the queue without waiting, after which accept() lets the event
+     * loop run once: while clients keep connecting, the queue never empties, and the other
+     * coroutines (the connections' own waits, timers, garbage collection) must still get turns.
+     */
+    public const ACCEPT_BURST = 64;
+
     /** @var resource|null */
     private $socket;
 
@@ -48,6 +55,9 @@ final class Listener implements IteratorAggregate
 
     /** A Unix socket's clients have no address. */
     private bool $unix = false;
+
+    /** Connections accepted since accept() last waited or let the loop run, see ACCEPT_BURST. */
+    private int $burst = 0;
 
     /**
      * @see listen()
@@ -116,7 +126,7 @@ final class Listener implements IteratorAggregate
     /**
      * Wait for the next connection and return it, like Go's Listener.Accept(). A connection
      * already waiting in the kernel's queue is returned without waiting for the event loop,
-     * so a burst of connections is admitted at once.
+     * so a burst of connections is admitted at once, up to ACCEPT_BURST of them.
      *
      * @param string|null $peer set to the peer address, like stream_socket_accept()
      *
@@ -127,7 +137,14 @@ final class Listener implements IteratorAggregate
     public function accept(?string &$peer = null)
     {
         while (\is_resource($this->socket)) {
-            if (!$this->hasPendingConnection()) {
+            if ($this->hasPendingConnection()) {
+                if (++$this->burst > self::ACCEPT_BURST) {
+                    $this->burst = 0;
+                    phasync::sleep(0);
+                    continue;
+                }
+            } else {
+                $this->burst = 0;
                 try {
                     phasync::readable($this->socket, \PHP_FLOAT_MAX);
                 } catch (IOException $e) {
