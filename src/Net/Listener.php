@@ -94,6 +94,14 @@ final class Listener implements IteratorAggregate
             throw new \RuntimeException("Failed to bind to $address: " . ($errstr ?: $warning ?? 'unknown error'), $errno);
         }
 
+        // A stream_socket_server() listener: PHP's socket context has no keepalive option
+        if (null === $this->sock && 'tcp' === $protocol && \function_exists('socket_import_stream')
+            && ($keepalive = (int) ($context['socket']['keepalive'] ?? 0)) > 0
+            && !self::setKeepalive(\socket_import_stream($socket), $keepalive)) {
+            \fclose($socket);
+            throw new \RuntimeException("Failed to set keepalive on $address");
+        }
+
         \stream_set_blocking($socket, false);
         $this->socket  = $socket;
         $this->address = (string) \stream_socket_get_name($socket, false);
@@ -340,9 +348,7 @@ final class Listener implements IteratorAggregate
             // Linux gives the listener's TCP_NODELAY to the connections it accepts
             || (($context['socket']['tcp_nodelay'] ?? false) && !@\socket_set_option($socket, \SOL_TCP, \TCP_NODELAY, 1))
             // so does its keepalive: first probe after $keepalive seconds idle, then every $keepalive, dropped after 9 unanswered
-            || (($keepalive = (int) ($context['socket']['keepalive'] ?? 0)) > 0
-                && !(@\socket_set_option($socket, \SOL_SOCKET, \SO_KEEPALIVE, 1) && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPIDLE, $keepalive)
-                    && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPINTVL, $keepalive) && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPCNT, 9))))
+            || (($keepalive = (int) ($context['socket']['keepalive'] ?? 0)) > 0 && !self::setKeepalive($socket, $keepalive)))
             || !@\socket_bind($socket, $host, (int) $port) || !@\socket_listen($socket, (int) ($context['socket']['backlog'] ?? 128))) {
             $errno = \socket_last_error($socket);
             \socket_close($socket);
@@ -352,6 +358,13 @@ final class Listener implements IteratorAggregate
         $this->sock = \socket_import_stream($stream);
 
         return $stream;
+    }
+
+    /** Keepalive as in Go: first probe after $seconds idle, then every $seconds, dropped after 9 unanswered. */
+    private static function setKeepalive(\Socket $socket, int $seconds): bool
+    {
+        return @\socket_set_option($socket, \SOL_SOCKET, \SO_KEEPALIVE, 1) && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPIDLE, $seconds)
+            && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPINTVL, $seconds) && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPCNT, 9);
     }
 
     private static function applyDefaultContext(array $context, string $protocol): array

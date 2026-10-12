@@ -411,6 +411,8 @@ test('accepted TCP connections have keepalive set as in Go (15 s idle, 15 s inte
     '30 s'     => [['socket' => ['keepalive' => 30]], [true, 30, 30, 9]],
     'zero'     => [['socket' => ['keepalive' => 0]], [false]],
     'false'    => [['socket' => ['keepalive' => false]], [false]],
+    // an option only stream_socket_server() takes: the listener is made by it, not by ext-sockets
+    'streams'  => [['socket' => ['ipv6_v6only' => false]], [true, 15, 15, 9]],
 ]);
 
 test('the Server option keepalive reaches the listener', function (array $options, array $expected) {
