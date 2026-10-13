@@ -8,21 +8,21 @@
     "packages": [
         {
             "name": "phasync/phasync",
-            "version": "2.0.0-beta7",
+            "version": "2.0.0-beta8",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "1f451848a898b3625350971c52085b20586d5e96"
+                "reference": "5e2b83a568ef9699f379837f68664797ab5c1b7f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/1f451848a898b3625350971c52085b20586d5e96",
-                "reference": "1f451848a898b3625350971c52085b20586d5e96",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/5e2b83a568ef9699f379837f68664797ab5c1b7f",
+                "reference": "5e2b83a568ef9699f379837f68664797ab5c1b7f",
                 "shasum": ""
             },
             "require": {
                 "php": "^8.2",
-                "psr/http-factory": "^1.1",
+                "psr/http-factory": "^1.0",
                 "psr/http-message": "^1.0 || ^2.0",
                 "psr/log": "^1.0 || ^2.0 || ^3.0"
             },
@@ -36,10 +36,16 @@
                 "friendsofphp/php-cs-fixer": "^3.58",
                 "pestphp/pest": "^2.34 || ^3.0"
             },
+            "bin": [
+                "bin/phasync"
+            ],
             "type": "library",
             "extra": {
                 "discovery": {
                     "psr/http-factory-implementation": "phasync\\Psr\\PsrFactory"
+                },
+                "branch-alias": {
+                    "dev-main": "2.0.x-dev"
                 }
             },
             "autoload": {
@@ -69,9 +75,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0-beta7"
+                "source": "https://github.com/phasync/phasync/tree/2.0.0-beta8"
             },
-            "time": "2026-10-04T21:05:16+00:00"
+            "time": "2026-10-13T23:08:28+00:00"
         },
         {
             "name": "psr/http-factory",
