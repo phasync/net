@@ -41,6 +41,8 @@ jobs:
       - name: ✅ Tests with the phasync extension
         # the binary bundled in the locked phasync release, loaded through PHP_INI_SCAN_DIR so the
         # PHP processes the tests start load it too
+        # the extension needs PHP 8.3+
+        if: matrix.php != '8.2'
         run: |
           mkdir -p "$RUNNER_TEMP/ini"
           echo "extension=$PWD/vendor/phasync/phasync/ext/phasync-${{ matrix.php }}-nts-x86_64-glibc.so" > "$RUNNER_TEMP/ini/phasync.ini"
