@@ -338,7 +338,9 @@ test('the listener and the connections it accepts are close-on-exec, so processe
     });
 
     // The listener and the accepted connection; the client, which PHP creates, is the one that is not
-    expect(array_count_values(array_map(intval(...), $new)))->toBe([1 => 2, 0 => 1]);
+    $counts = array_count_values(array_map(intval(...), $new));
+    ksort($counts); // in the order the descriptors were numbered, which varies
+    expect($counts)->toBe([0 => 1, 1 => 2]);
 })->with([
     'tcp'  => ['127.0.0.1:0'],
     'unix' => ['unix://' . sys_get_temp_dir() . '/phasync_cloexec.sock'],
