@@ -128,7 +128,7 @@ turns it off. It needs ext-sockets (PHP's stream contexts don't apply keepalive 
 sockets) and is silently not applied without it.
 
 ```php
-listen('0.0.0.0:8080', ['socket' => ['keepalive' => 30]]);
+listen('0.0.0.0:8080', ['keepalive' => 30]);
 ```
 
 ### Port 0
@@ -143,7 +143,7 @@ echo $listener->addr(); // 127.0.0.1:43127
 ### API
 
 ```php
-phasync\Net\listen(string $address, array $context = []): Listener
+phasync\Net\listen(string $address, array $options = []): Listener
 
 $listener->accept(?string &$peer = null)      // connection; $peer is set to its address; IOException once closed
 foreach ($listener as $peer => $conn)         // until the listener is closed
@@ -182,15 +182,18 @@ phasync::run(function () {
 | `close(): void` | Close once what was written is sent; waiting reads end with `''`, writes throw `IOException` |
 | `peer()`, `local()` | The two ends' addresses |
 
-`serve()` options: `backlog`, `reuseport` (default true), `nodelay` (default true),
-`keepalive` (seconds, default 15; `0` turns it off), `max_connections` (new connections wait in the kernel's backlog meanwhile; `isFull()`). A slow
-reader pauses its client: data it hasn't read stays in the client's socket.
+`serve()` options: `backlog`, `so_reuseport` (default **false**; several processes can share a
+port when they all opt in), `tcp_nodelay` (default true), `keepalive` (seconds, default 15; `0`
+turns it off), `max_connections` (new connections wait in the kernel's backlog meanwhile;
+`isFull()`). A slow reader pauses its client: data it hasn't read stays in the client's socket.
 
-`new StreamDuplex($stream)` makes any stream resource a `Duplex`, such as a `dial()` connection.
+`new StreamDuplex($stream)` makes any stream resource a `Duplex`; `dial()` already returns one.
 
 ## Connecting: `dial()`
 
-Connect without blocking other coroutines, including the DNS lookup and a TLS handshake:
+Connect without blocking other coroutines, including the DNS lookup and a TLS handshake.
+`dial()` returns a `Duplex`, the same type `serve()` hands out, so client and server code
+share the same read/write API:
 
 ```php
 use function phasync\Net\dial;
@@ -198,11 +201,11 @@ use function phasync\Net\dial;
 phasync::run(function () {
     $conn = dial('example.com:80');
 
-    fwrite(phasync::writable($conn), "GET / HTTP/1.0\r\nHost: example.com\r\n\r\n");
-    while (!feof($conn)) {
-        echo fread(phasync::readable($conn), 65536);
+    $conn->write("GET / HTTP/1.0\r\nHost: example.com\r\n\r\n");
+    while ('' !== ($data = $conn->read())) {
+        echo $data;
     }
-    fclose($conn);
+    $conn->close();
 });
 ```
 
@@ -210,10 +213,13 @@ phasync::run(function () {
 dial('tls://example.com:443');   // TLS; the certificate is checked against the host name
 dial('unix:///run/app.sock');    // Unix domain socket
 dial('[::1]:8080', timeout: 5);  // the timeout covers lookup, connect and TLS handshake
+
+// context escapes to raw stream context options, such as a TLS trust store
+dial('tls://example.com:443', options: ['context' => ['ssl' => ['cafile' => '/path/ca.pem']]]);
 ```
 
 ```php
-phasync\Net\dial(string $address, float $timeout = 30, array $context = []): resource
+phasync\Net\dial(string $address, float $timeout = 30, array $options = []): Duplex
 ```
 
 ## UDP: `listenPacket()`
@@ -237,7 +243,7 @@ loop per address as with `listen()`.
 ### API
 
 ```php
-phasync\Net\listenPacket(string $address, array $context = []): PacketConn
+phasync\Net\listenPacket(string $address, array $options = []): PacketConn
 
 $conn->readFrom(int $maxLength = 65536): array{string, string}  // [datagram, peer]; IOException once closed
 foreach ($conn as $peer => $data)                               // until the socket is closed
@@ -279,17 +285,25 @@ Dns::clearCache(): void
 
 ## Socket options
 
+One flat option shape, PHP's own stream-context names, for `listen()`, `serve()`,
+`listenPacket()` and `dial()` alike:
+
 | Option | Default | Why |
 |--------|---------|-----|
-| `backlog` | `65535` | Room for connection bursts. The kernel caps it at its own limit (`net.core.somaxconn` on Linux), so a high value is safe. |
-| `so_reuseport` | `true` | Several processes can listen on the same port, for multi-process scaling and graceful restarts. |
+| `backlog` | `net.core.somaxconn` on Linux, capped at 65535 (older kernels store it in 16 bits); `511` elsewhere | Room for connection bursts. |
+| `so_reuseport` | **`false`** | Opt in to let several processes listen on the same port, for multi-process scaling and graceful restarts. Off by default so a forgotten extra process doesn't silently share a port. |
 | `tcp_nodelay` | `true` | Small responses are sent immediately instead of waiting to be batched. |
+| `keepalive` | `15` (seconds) | `listen()`/`serve()` only; see [Keepalive](#keepalive). |
+| `max_connections` | `0` (no limit) | `serve()` only. |
 
-Override them with `$context`:
+An option name any of these functions doesn't recognise throws `InvalidArgumentException`
+instead of being silently ignored. A `context` key escapes to raw stream context options
+(anything `stream_socket_server()`/`stream_socket_client()` take, such as `ssl`):
 
 ```php
 $listener = listen('0.0.0.0:8080', [
-    'socket' => ['tcp_nodelay' => false],
+    'tcp_nodelay' => false,
+    'context'     => ['socket' => ['ipv6_v6only' => false]],
 ]);
 ```
 
