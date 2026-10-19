@@ -149,3 +149,32 @@ test('dial() with tls:// does a TLS handshake without blocking other coroutines'
 
     expect($result)->toBe(['secret', true, true]);
 });
+
+test('dial() returns a Duplex (the same type serve() hands out), not a raw resource', function () {
+    $response = phasync::run(function () {
+        $server = phasync\Net\listen('127.0.0.1:0');
+
+        phasync::go(function () use ($server) {
+            foreach ($server as $stream) {
+                $data = fread(phasync::readable($stream), 65536);
+                fwrite(phasync::writable($stream), "Echo: $data");
+                fclose($stream);
+                $server->close();
+            }
+        });
+
+        $client = phasync\Net\dial($server->addr());
+        $client->write('Hello');
+        $response = $client->read(65536, 5);
+        $client->close();
+
+        return $response;
+    });
+
+    expect($response)->toBe('Echo: Hello');
+});
+
+test('dial() rejects unknown option names loudly', function () {
+    expect(fn () => phasync::run(fn () => phasync\Net\dial('127.0.0.1:1', timeout: 0.1, options: ['nodelay' => true])))
+        ->toThrow(InvalidArgumentException::class, 'Unknown option nodelay');
+});

@@ -440,3 +440,42 @@ test('the Server option keepalive reaches the listener', function (array $option
     '20 s'    => [['keepalive' => 20], [true, 20, 20, 9]],
     'off'     => [['keepalive' => 0], [false]],
 ]);
+
+test('SO_REUSEPORT is off by default: a second listener on the same port fails unless both opt in', function () {
+    $first = phasync\Net\listen('127.0.0.1:0');
+    $port  = substr($first->addr(), strrpos($first->addr(), ':') + 1);
+
+    expect(fn () => phasync\Net\listen("127.0.0.1:$port"))->toThrow(RuntimeException::class);
+    $first->close();
+});
+
+test('SO_REUSEPORT lets two listeners share a port when both opt in', function () {
+    $first = phasync\Net\listen('127.0.0.1:0', ['so_reuseport' => true]);
+    $port  = substr($first->addr(), strrpos($first->addr(), ':') + 1);
+
+    $second = phasync\Net\listen("127.0.0.1:$port", ['so_reuseport' => true]);
+
+    expect($second->addr())->toBe($first->addr());
+    $first->close();
+    $second->close();
+});
+
+test('listen() takes flat phasync/net option names, and rejects unknown ones loudly', function () {
+    $listener = phasync\Net\listen('127.0.0.1:0', ['backlog' => 16, 'tcp_nodelay' => false, 'keepalive' => 5]);
+    $listener->close();
+
+    expect(fn () => phasync\Net\listen('127.0.0.1:0', ['reuseport' => true]))
+        ->toThrow(InvalidArgumentException::class, 'Unknown option reuseport');
+    expect(fn () => phasync\Net\listen('127.0.0.1:0', ['nodelay' => true]))
+        ->toThrow(InvalidArgumentException::class, 'Unknown option nodelay');
+    expect(fn () => phasync\Net\listen('127.0.0.1:0', ['socket' => ['backlog' => 16]]))
+        ->toThrow(InvalidArgumentException::class, 'Unknown option socket');
+});
+
+test('the backlog default is net.core.somaxconn capped at 65535, or 511 where it cannot be read', function () {
+    $expected = is_readable('/proc/sys/net/core/somaxconn')
+        ? min((int) trim((string) file_get_contents('/proc/sys/net/core/somaxconn')), 65535)
+        : 511;
+
+    expect(phasync\Net\SocketOptions::defaultBacklog())->toBe($expected);
+});
