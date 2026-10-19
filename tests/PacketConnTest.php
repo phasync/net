@@ -114,3 +114,29 @@ test('readFrom() and writeTo() throw IOException on a closed socket', function (
     expect(fn () => phasync::run(fn () => $conn->readFrom()))->toThrow(phasync\IOException::class);
     expect(fn () => $conn->writeTo('x', '127.0.0.1:9'))->toThrow(phasync\IOException::class);
 });
+
+/** Whether SO_REUSEPORT is set on a PacketConn's underlying socket. */
+function packetconn_reuseport(phasync\Net\PacketConn $conn): bool
+{
+    $stream = (new ReflectionProperty($conn, 'socket'))->getValue($conn);
+
+    return (bool) socket_get_option(socket_import_stream($stream), SOL_SOCKET, SO_REUSEPORT);
+}
+
+test('PacketConn defaults so_reuseport to off, and the option reaches the socket', function () {
+    if (!extension_loaded('sockets')) {
+        $this->markTestSkipped('Needs ext-sockets');
+    }
+    $default = phasync\Net\listenPacket('127.0.0.1:0');
+    expect(packetconn_reuseport($default))->toBeFalse();
+    $default->close();
+
+    $withOption = phasync\Net\listenPacket('127.0.0.1:0', ['so_reuseport' => true]);
+    expect(packetconn_reuseport($withOption))->toBeTrue();
+    $withOption->close();
+});
+
+test('listenPacket() rejects unknown option names loudly', function () {
+    expect(fn () => phasync\Net\listenPacket('127.0.0.1:0', ['reuseport' => true]))
+        ->toThrow(InvalidArgumentException::class, 'Unknown option reuseport');
+});

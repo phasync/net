@@ -30,16 +30,20 @@ final class PacketConn implements IteratorAggregate
     private string $address;
 
     /**
+     * @param array $options so_reuseport (default false). `context` escapes to raw stream
+     *                        context options for anything not named above.
+     *
      * @see listenPacket()
      *
      * @throws \RuntimeException if the address cannot be bound
      */
-    public function __construct(string $address, array $context = [])
+    public function __construct(string $address, array $options = [])
     {
         if (!\str_contains($address, '://')) {
             $address = 'udp://' . $address;
         }
-        $context['socket']['so_reuseport'] ??= true;
+        [$socketOptions, $context] = SocketOptions::normalize($options, ['so_reuseport'], ['so_reuseport' => false]);
+        $context['socket']         = $socketOptions + ($context['socket'] ?? []);
 
         $warning = null;
         \set_error_handler(static function (int $code, string $message) use (&$warning): bool {

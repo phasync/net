@@ -50,13 +50,14 @@ function serve(string|Listener $address, array $options = []): Server
  *
  * @param string $address Address to bind, such as '0.0.0.0:9000'. Port 0 picks a free port;
  *                        see PacketConn::addr().
- * @param array  $context Stream context options. Default: so_reuseport enabled.
+ * @param array  $options so_reuseport (default false). `context` escapes to raw stream context
+ *                        options for anything not named above.
  *
  * @throws \RuntimeException if the address cannot be bound
  */
-function listenPacket(string $address, array $context = []): PacketConn
+function listenPacket(string $address, array $options = []): PacketConn
 {
-    return new PacketConn($address, $context);
+    return new PacketConn($address, $options);
 }
 
 /**
