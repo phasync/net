@@ -8,20 +8,21 @@ use phasync;
  * Listen for connections on a TCP or Unix domain socket, like Go's net.Listen().
  *
  * @param string $address Address to listen on, such as '0.0.0.0:8080', '[::]:8080' or
- *                        'unix:///run/app.sock'. Port 0 picks a free port; see
- *                        Listener::addr().
- * @param array  $context Stream context options. Defaults: backlog 65535 (the kernel caps
- *                        it at its own limit, net.core.somaxconn on Linux), and for TCP
- *                        so_reuseport and tcp_nodelay enabled. The extra socket option keepalive
- *                        (seconds, default 15; 0 or false: off) sets TCP keepalive on the
- *                        accepted connections, as Go does; it needs ext-sockets and is
- *                        otherwise not applied.
+ *                         'unix:///run/app.sock'. Port 0 picks a free port; see
+ *                         Listener::addr().
+ * @param array  $options so_reuseport (default false: opt in for several processes to share
+ *                         the port, for multi-process scaling and graceful restarts), tcp_nodelay
+ *                         (default true), backlog (default: net.core.somaxconn on Linux, capped
+ *                         at 65535; else 511), keepalive (seconds, default 15; 0 or false: off;
+ *                         needs ext-sockets and is otherwise not applied) — the last three don't
+ *                         apply to a Unix socket. `context` escapes to raw stream context
+ *                         options (such as 'ssl') for anything not named above.
  *
  * @throws \RuntimeException if the address cannot be bound
  */
-function listen(string $address, array $context = []): Listener
+function listen(string $address, array $options = []): Listener
 {
-    return new Listener($address, $context);
+    return new Listener($address, $options);
 }
 
 /**
@@ -30,9 +31,12 @@ function listen(string $address, array $context = []): Listener
  * @param string|Listener $address Such as '0.0.0.0:8080', '[::]:8080' or 'unix:///run/app.sock'
  *                                 (port 0 picks a free port; see Server::addr()), or a Listener
  *                                 to serve, such as Listener::fromStream($socket)
- * @param array           $options backlog (65535, capped by the kernel), reuseport (true), nodelay
- *                                 (true), keepalive (15 seconds; 0 or false: off), max_connections
- *                                 (0: no limit). Not used with a Listener, except max_connections.
+ * @param array           $options so_reuseport (default false), tcp_nodelay (default true),
+ *                                 backlog (default: net.core.somaxconn on Linux, capped at
+ *                                 65535; else 511), keepalive (seconds, default 15; 0 or false:
+ *                                 off), max_connections (0: no limit), context (raw stream
+ *                                 context options, such as 'ssl'). Not used with a Listener,
+ *                                 except max_connections.
  *
  * @throws \RuntimeException if the address cannot be bound
  */

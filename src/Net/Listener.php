@@ -60,17 +60,31 @@ final class Listener implements IteratorAggregate
     private int $burst = 0;
 
     /**
+     * @param array $options so_reuseport (default false), tcp_nodelay (default true), backlog
+     *                        (default: net.core.somaxconn on Linux, capped at 65535; else 511),
+     *                        keepalive (seconds, default 15; 0 or false: off) — so_reuseport,
+     *                        tcp_nodelay and keepalive don't apply to a Unix socket and are
+     *                        rejected. `context` escapes to raw stream context options (such as
+     *                        'ssl') for anything not named above.
+     *
      * @see listen()
      *
      * @throws \RuntimeException if the address cannot be bound
      */
-    public function __construct(string $address, array $context = [])
+    public function __construct(string $address, array $options = [])
     {
         if (!\str_contains($address, '://')) {
             $address = 'tcp://' . $address;
         }
         $protocol = \strstr($address, '://', true);
-        $context  = self::applyDefaultContext($context, $protocol);
+        $unix     = 'unix' === $protocol;
+
+        $allowed  = $unix ? ['backlog'] : ['backlog', 'so_reuseport', 'tcp_nodelay', 'keepalive'];
+        $defaults = $unix
+            ? ['backlog' => SocketOptions::defaultBacklog()]
+            : ['backlog' => SocketOptions::defaultBacklog(), 'so_reuseport' => false, 'tcp_nodelay' => true, 'keepalive' => 15];
+        [$socketOptions, $context] = SocketOptions::normalize($options, $allowed, $defaults);
+        $context['socket']         = $socketOptions + ($context['socket'] ?? []);
 
         $warning = null;
         \set_error_handler(static function (int $code, string $message) use (&$warning): bool {
@@ -367,19 +381,4 @@ final class Listener implements IteratorAggregate
             && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPINTVL, $seconds) && @\socket_set_option($socket, \SOL_TCP, \TCP_KEEPCNT, 9);
     }
 
-    private static function applyDefaultContext(array $context, string $protocol): array
-    {
-        $context['socket']['backlog'] ??= 65535;
-
-        if ('unix' === $protocol) {
-            // Unix sockets don't support these options
-            unset($context['socket']['so_reuseport'], $context['socket']['tcp_nodelay'], $context['socket']['keepalive']);
-        } else {
-            $context['socket']['so_reuseport'] ??= true;
-            $context['socket']['tcp_nodelay']  ??= true;
-            $context['socket']['keepalive']    ??= 15;
-        }
-
-        return $context;
-    }
 }

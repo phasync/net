@@ -47,20 +47,32 @@ final class Server implements IteratorAggregate
     /** Raised when $fullAndWaiting becomes true. */
     private readonly object $full;
 
+    private readonly array $options;
+
     /**
      * @param string|Listener $address an address to listen on, or a Listener to serve (such as
      *                                 Listener::fromStream()), which is then not given the
-     *                                 backlog, reuseport, nodelay and keepalive options
+     *                                 so_reuseport, tcp_nodelay, backlog, keepalive and context
+     *                                 options: only max_connections applies
+     * @param array           $options so_reuseport, tcp_nodelay, backlog, keepalive and context:
+     *                                 see Listener; max_connections (default 0: no limit)
      *
      * @see serve()
      *
      * @throws \RuntimeException if the address cannot be bound
      */
-    public function __construct(string|Listener $address, private readonly array $options = [])
+    public function __construct(string|Listener $address, array $options = [])
     {
         $this->room    = new \stdClass();
         $this->full    = new \stdClass();
         $this->streams = new \WeakMap();
+
+        $allowed = $address instanceof Listener
+            ? ['max_connections']
+            : ['backlog', 'so_reuseport', 'tcp_nodelay', 'keepalive', 'max_connections'];
+        [$options, $context] = SocketOptions::normalize($options, $allowed, ['max_connections' => 0]);
+        $this->options        = $options;
+
         if ($address instanceof Listener) {
             $this->listener = $address;
 
@@ -69,12 +81,12 @@ final class Server implements IteratorAggregate
         if (!\str_contains($address, '://')) {
             $address = 'tcp://' . $address;
         }
-        $this->listener = new Listener($address, ['socket' => [
-            'backlog'      => $options['backlog'] ?? 65535,
-            'so_reuseport' => $options['reuseport'] ?? true,
-            'tcp_nodelay'  => $options['nodelay'] ?? true,
-            'keepalive'    => $options['keepalive'] ?? 15,
-        ]]);
+        $listenerOptions = $options;
+        unset($listenerOptions['max_connections']);
+        if ($context) {
+            $listenerOptions['context'] = $context;
+        }
+        $this->listener = new Listener($address, $listenerOptions);
     }
 
     /**

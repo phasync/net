@@ -104,7 +104,7 @@ test('Listener lets the event loop run after every ACCEPT_BURST connections take
     // other coroutines (the connections' own) from ever running.
     $n      = 2 * phasync\Net\Listener::ACCEPT_BURST + 10;
     $result = phasync::run(function () use ($n) {
-        $server  = phasync\Net\listen('127.0.0.1:0', ['socket' => ['backlog' => 1024]]);
+        $server  = phasync\Net\listen('127.0.0.1:0', ['backlog' => 1024]);
         $clients = [];
         for ($i = 0; $i < $n; ++$i) {
             $clients[] = stream_socket_client('tcp://' . $server->addr());
@@ -410,11 +410,11 @@ test('accepted TCP connections have keepalive set as in Go (15 s idle, 15 s inte
     expect($result)->toBe($expected);
 })->with([
     'default'  => [[], [true, 15, 15, 9]],
-    '30 s'     => [['socket' => ['keepalive' => 30]], [true, 30, 30, 9]],
-    'zero'     => [['socket' => ['keepalive' => 0]], [false]],
-    'false'    => [['socket' => ['keepalive' => false]], [false]],
+    '30 s'     => [['keepalive' => 30], [true, 30, 30, 9]],
+    'zero'     => [['keepalive' => 0], [false]],
+    'false'    => [['keepalive' => false], [false]],
     // an option only stream_socket_server() takes: the listener is made by it, not by ext-sockets
-    'streams'  => [['socket' => ['ipv6_v6only' => false]], [true, 15, 15, 9]],
+    'streams'  => [['context' => ['socket' => ['ipv6_v6only' => false]]], [true, 15, 15, 9]],
 ]);
 
 test('the Server option keepalive reaches the listener', function (array $options, array $expected) {
