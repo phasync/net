@@ -299,22 +299,17 @@ $listener = listen('0.0.0.0:8080', [
 
 phasync waits for sockets with `stream_select()`, which in PHP fails for any file descriptor
 numbered 1024 or higher. A server with more than roughly 1,000 open connections hits that.
-The [phasync extension](https://github.com/phasync/phasync-ext) replaces it with a version
-without that limit. It is CLI only.
+The [phasync extension](https://github.com/phasync/ext-phasync) (MIT) replaces it with an epoll
+poller without that limit.
 
 Code written for phasync, like the examples here, works the same with the extension. Its
 other job is making ordinary blocking code cooperate: inside `phasync::run()`, a library's
-`fread()` / `fwrite()` on a blocking stream, file reads, DNS lookups and `usleep()` suspend
-the coroutine instead of stalling every connection. I/O outside PHP's streams, such as curl
-or a database client library, still blocks.
+`fread()` / `fwrite()` on a blocking stream, file reads, DNS lookups, `usleep()`, PDO, mysqli and
+curl suspend the coroutine instead of stalling every connection.
 
-```bash
-composer require phasync/phasync-ext
-```
-
-```php
-phasync\try_enable_ext(); // first line of your script; may restart the process once
-```
+Release packages of phasync carry prebuilt binaries: run the server with
+`vendor/bin/phasync server.php` instead of `php server.php`, or install the extension for every
+SAPI with `pie install phasync/ext-phasync`.
 
 ### JIT
 
