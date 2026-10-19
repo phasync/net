@@ -19,7 +19,7 @@
     ],
     "require": {
         "php": "^8.2",
-        "phasync/phasync": "^2.0@alpha"
+        "phasync/phasync": "^2.0"
     },
     "require-dev": {
         "friendsofphp/php-cs-fixer": "^3.0",

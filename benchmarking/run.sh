@@ -4,7 +4,7 @@
 # Usage: benchmarking/run.sh ["100 900 10000"]
 #
 # Needs wrk and node. For more than ~1,000 connections phasync needs the phasync extension
-# (composer require phasync/phasync-ext), or set PHASYNC_EXT_SO to a built phasync.so.
+# (run with vendor/bin/phasync, or pie install phasync/ext-phasync).
 # For each run it also samples how many connections the server has actually accepted after
 # 5 seconds: a server that leaves connections in the kernel queue serves fewer clients and
 # looks faster than it is.

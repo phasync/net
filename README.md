@@ -333,29 +333,6 @@ PHP's JIT is off by default on the command line. For a server, turn it on:
 php -d opcache.enable_cli=1 -d opcache.jit=tracing -d opcache.jit_buffer_size=128M server.php
 ```
 
-In the benchmark below it added 8–18% throughput.
-
-## Benchmark
-
-Hello-world keep-alive HTTP responder on raw sockets (no HTTP library), one process each:
-phasync/net 2.0.0-alpha1 with phasync-ext 0.4.0-alpha11 and JIT on PHP 8.3, and node v18 with the `net` module.
-`wrk -t8 -d10s` on a Ryzen 9 9950X3D:
-
-| Connections | phasync req/s | node req/s | phasync p99 | node p99 |
-|---|---|---|---|---|
-| 100 | 254k | 262k | 0.47 ms | 0.50 ms |
-| 900 | 230k | 252k | 5.0 ms | 376 ms |
-| 10,000 | 105k | 155k* | 98 ms | 30 ms* |
-
-\* At 10,000 connections node had only accepted about 8,350 of them after 5 seconds, with
-287 timeouts, so it was serving fewer clients. phasync had all 10,000 connections accepted
-with no errors.
-
-This handler does almost nothing per request, which favours node: its event loop runs in C
-while phasync's runs in PHP. With more work per request, phasync's per-request overhead is
-lower: waiting on I/O suspends a fiber, where node allocates promises for every `await`.
-
-The scripts are in [`benchmarking/`](benchmarking/).
 
 ## Upgrading from 1.x
 
