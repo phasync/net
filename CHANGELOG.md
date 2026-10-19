@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.0.0 (2026-10-19)
 
 Breaking changes, preparing phasync/net for release. No compatibility shims: upgrade in one
 pass.
