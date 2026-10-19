@@ -33,7 +33,7 @@ function with_server(Closure $handle, Closure $test, array $options = []): mixed
 
 function client(Server $server): StreamDuplex
 {
-    return new StreamDuplex(dial($server->addr()));
+    return dial($server->addr());
 }
 
 /** Everything the peer sends until it finishes. */

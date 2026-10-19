@@ -14,9 +14,9 @@ test('dial() connects and exchanges data', function () {
         });
 
         $client = phasync\Net\dial($server->addr());
-        fwrite(phasync::writable($client), 'Hello');
-        $response = fread(phasync::readable($client), 65536);
-        fclose($client);
+        $client->write('Hello');
+        $response = $client->read(65536, 5);
+        $client->close();
 
         return $response;
     });
@@ -24,12 +24,15 @@ test('dial() connects and exchanges data', function () {
     expect($response)->toBe('Echo: Hello');
 });
 
-test('dial() returns a plain non-blocking stream, not an AsyncStream-wrapped one', function () {
+test('dial() returns a Duplex (the same type serve() hands out), not a raw resource', function () {
     $meta = phasync::run(function () {
         $server = phasync\Net\listen('127.0.0.1:0');
         $client = phasync\Net\dial($server->addr());
-        $meta   = stream_get_meta_data($client);
-        fclose($client);
+        expect($client)->toBeInstanceOf(phasync\Net\Duplex::class);
+        expect($client)->toBeInstanceOf(phasync\Net\StreamDuplex::class);
+        $stream = (new ReflectionProperty($client, 'stream'))->getValue($client);
+        $meta   = stream_get_meta_data($stream);
+        $client->close();
         $server->close();
 
         return $meta;
@@ -65,8 +68,8 @@ test('dial() connects to a Unix socket', function () {
         });
 
         $client   = phasync\Net\dial('unix://' . $socketPath);
-        $response = fread(phasync::readable($client), 65536);
-        fclose($client);
+        $response = $client->read(65536, 5);
+        $client->close();
 
         return $response;
     });
@@ -85,8 +88,8 @@ test('dial() resolves a host name', function () {
             $listener->close();
         });
         $conn = phasync\Net\dial("localhost:$port", 5);
-        $data = fread(phasync::readable($conn), 10);
-        fclose($conn);
+        $data = $conn->read(10, 5);
+        $conn->close();
 
         return $data;
     });
@@ -129,15 +132,16 @@ test('dial() with tls:// does a TLS handshake without blocking other coroutines'
             });
 
             // The test certificate is self-signed, so trust it explicitly
-            $conn = phasync\Net\dial("tls://localhost:$port", 5, ['ssl' => ['cafile' => $pemFile]]);
+            $conn   = phasync\Net\dial("tls://localhost:$port", 5, ['context' => ['ssl' => ['cafile' => $pemFile]]]);
+            $stream = (new ReflectionProperty($conn, 'stream'))->getValue($conn);
             // TLS 1.3 session tickets make the socket readable without application data, so
             // a non-blocking read can return '' before the data arrives
             $data = '';
-            while ('' === $data && !feof($conn)) {
-                $data = fread(phasync::readable($conn), 10);
+            while ('' === $data && !$conn->eof()) {
+                $data = $conn->read(10, 5);
             }
-            $crypto = stream_get_meta_data($conn)['crypto']['protocol'] ?? null;
-            fclose($conn);
+            $crypto = stream_get_meta_data($stream)['crypto']['protocol'] ?? null;
+            $conn->close();
             $stop = true;
             phasync::await($ticker);
 
@@ -148,30 +152,6 @@ test('dial() with tls:// does a TLS handshake without blocking other coroutines'
     }
 
     expect($result)->toBe(['secret', true, true]);
-});
-
-test('dial() returns a Duplex (the same type serve() hands out), not a raw resource', function () {
-    $response = phasync::run(function () {
-        $server = phasync\Net\listen('127.0.0.1:0');
-
-        phasync::go(function () use ($server) {
-            foreach ($server as $stream) {
-                $data = fread(phasync::readable($stream), 65536);
-                fwrite(phasync::writable($stream), "Echo: $data");
-                fclose($stream);
-                $server->close();
-            }
-        });
-
-        $client = phasync\Net\dial($server->addr());
-        $client->write('Hello');
-        $response = $client->read(65536, 5);
-        $client->close();
-
-        return $response;
-    });
-
-    expect($response)->toBe('Echo: Hello');
 });
 
 test('dial() rejects unknown option names loudly', function () {

@@ -68,25 +68,30 @@ function listenPacket(string $address, array $options = []): PacketConn
  *                        or 'tls://example.com:443' (the certificate is checked against the
  *                        host name)
  * @param float  $timeout Seconds for all of it: lookup, connect and TLS handshake
- * @param array  $context Stream context options. Default for TCP and TLS: tcp_nodelay.
+ * @param array  $options tcp_nodelay (default true; not applicable to a Unix socket). `context`
+ *                        escapes to raw stream context options (such as 'ssl') for anything
+ *                        not named above.
  *
- * @return resource a connected, non-blocking stream
+ * @return Duplex a connected StreamDuplex, the same type serve() hands out
  *
  * @throws \RuntimeException    when the lookup, the connection or the TLS handshake fails
  * @throws phasync\TimeoutException when it takes longer than $timeout
  */
-function dial(string $address, float $timeout = 30, array $context = []): mixed
+function dial(string $address, float $timeout = 30, array $options = []): Duplex
 {
     if (!\str_contains($address, '://')) {
         $address = 'tcp://' . $address;
     }
     $scheme    = \strstr($address, '://', true);
     $tls       = 'tls' === $scheme || 'ssl' === $scheme;
+    $unix      = 'unix' === $scheme;
     $deadline  = \microtime(true) + $timeout;
     $remaining = static fn (): float => \max(0.0, $deadline - \microtime(true));
 
+    [$socketOptions, $context] = SocketOptions::normalize($options, $unix ? [] : ['tcp_nodelay'], $unix ? [] : ['tcp_nodelay' => true]);
+
     $target = $address;
-    if ('unix' !== $scheme) {
+    if (!$unix) {
         $parts = \parse_url($address);
         $host  = $parts['host'] ?? throw new \InvalidArgumentException("No host in $address");
         $port  = $parts['port'] ?? throw new \InvalidArgumentException("No port in $address");
@@ -96,8 +101,8 @@ function dial(string $address, float $timeout = 30, array $context = []): mixed
                 ?? throw new \RuntimeException("DNS lookup failed for $host");
         }
         // Connect as TCP and do the TLS handshake after, so it can wait without blocking
-        $target = ($tls ? 'tcp' : $scheme) . '://' . (\str_contains($ip, ':') ? "[$ip]" : $ip) . ':' . $port;
-        $context['socket']['tcp_nodelay'] ??= true;
+        $target            = ($tls ? 'tcp' : $scheme) . '://' . (\str_contains($ip, ':') ? "[$ip]" : $ip) . ':' . $port;
+        $context['socket']  = $socketOptions + ($context['socket'] ?? []);
         if ($tls) {
             $context['ssl']['peer_name'] ??= \trim($host, '[]');
         }
@@ -136,5 +141,5 @@ function dial(string $address, float $timeout = 30, array $context = []): mixed
         throw $e;
     }
 
-    return $socket;
+    return new StreamDuplex($socket);
 }
