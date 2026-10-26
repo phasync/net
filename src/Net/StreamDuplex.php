@@ -11,6 +11,9 @@ use phasync\IOException;
  */
 final class StreamDuplex implements Duplex
 {
+    /** The most a write hands the kernel at once after it stopped taking everything. */
+    private const PIECE = 65536;
+
     private bool $eof = false;
 
     private bool $closed = false;
@@ -73,17 +76,26 @@ final class StreamDuplex implements Duplex
         }
         $this->writing = true;
         try {
-            while ('' !== $bytes) {
+            if ($this->closed) {
+                throw new IOException('The connection is closed');
+            }
+            $n = @\fwrite($this->stream, $bytes);
+            if (false === $n) {
+                throw new IOException('The connection broke');
+            }
+            if ($n === \strlen($bytes)) {
+                return;
+            }
+            // The kernel took part: the rest goes out in slices from an offset, so no write
+            // copies all that is left
+            for ($offset = $n, $length = \strlen($bytes); $offset < $length; $offset += $n) {
+                phasync::writable($this->stream, $remaining());
                 if ($this->closed) {
                     throw new IOException('The connection is closed');
                 }
-                $n = @\fwrite($this->stream, $bytes);
+                $n = @\fwrite($this->stream, \substr($bytes, $offset, self::PIECE));
                 if (false === $n) {
                     throw new IOException('The connection broke');
-                }
-                $bytes = \substr($bytes, $n);
-                if ('' !== $bytes) {
-                    phasync::writable($this->stream, $remaining());
                 }
             }
         } finally {
