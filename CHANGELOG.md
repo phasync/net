@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.2 (2026-10-30)
+
+The same as 2.0.2-RC1, tested with phasync 2.0.7.
+
 ## 2.0.2-RC1 (2026-10-29)
 
 - A large `StreamDuplex::write()` the kernel takes in parts goes out in 64 KB slices from an offset; each partial write copied the whole rest (a 16 MB write: about 1.2 s of copying).

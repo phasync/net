@@ -8,16 +8,16 @@
     "packages": [
         {
             "name": "fiber-interop/scope",
-            "version": "v0.3.0",
+            "version": "v0.5.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/fiber-interop/scope.git",
-                "reference": "74e579e94c2e46e29075550f14fa9b5577e772fe"
+                "reference": "7c60c441a6b90f295d4f862553d6dc547f241e14"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/fiber-interop/scope/zipball/74e579e94c2e46e29075550f14fa9b5577e772fe",
-                "reference": "74e579e94c2e46e29075550f14fa9b5577e772fe",
+                "url": "https://api.github.com/repos/fiber-interop/scope/zipball/7c60c441a6b90f295d4f862553d6dc547f241e14",
+                "reference": "7c60c441a6b90f295d4f862553d6dc547f241e14",
                 "shasum": ""
             },
             "require": {
@@ -32,7 +32,7 @@
             "type": "library",
             "extra": {
                 "branch-alias": {
-                    "dev-main": "0.3.x-dev"
+                    "dev-main": "0.5.x-dev"
                 }
             },
             "autoload": {
@@ -60,26 +60,26 @@
             ],
             "support": {
                 "issues": "https://github.com/fiber-interop/scope/issues",
-                "source": "https://github.com/fiber-interop/scope/tree/v0.3.0"
+                "source": "https://github.com/fiber-interop/scope/tree/v0.5.0"
             },
-            "time": "2026-10-19T11:28:48+00:00"
+            "time": "2026-10-30T08:24:00+00:00"
         },
         {
             "name": "phasync/phasync",
-            "version": "2.0.0",
+            "version": "2.0.7",
             "source": {
                 "type": "git",
                 "url": "https://github.com/phasync/phasync.git",
-                "reference": "505d0aaf5f040fc910c81431cbc9bd549d5d96a3"
+                "reference": "99f69ab3070c2507befa4801bc397c648ff0783e"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/phasync/phasync/zipball/505d0aaf5f040fc910c81431cbc9bd549d5d96a3",
-                "reference": "505d0aaf5f040fc910c81431cbc9bd549d5d96a3",
+                "url": "https://api.github.com/repos/phasync/phasync/zipball/99f69ab3070c2507befa4801bc397c648ff0783e",
+                "reference": "99f69ab3070c2507befa4801bc397c648ff0783e",
                 "shasum": ""
             },
             "require": {
-                "fiber-interop/scope": "^0.3",
+                "fiber-interop/scope": "^0.5",
                 "php": "^8.2",
                 "psr/http-factory": "^1.0",
                 "psr/http-message": "^1.0 || ^2.0",
@@ -87,6 +87,9 @@
             },
             "provide": {
                 "psr/http-factory-implementation": "1.1"
+            },
+            "replace": {
+                "phasync/fiber-interop-facade": "^1.0"
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.58",
@@ -107,7 +110,6 @@
             },
             "autoload": {
                 "files": [
-                    "src/async_interfaces.php",
                     "src/functions.php",
                     "src/ext_loader.php"
                 ],
@@ -132,9 +134,9 @@
             "description": "phasync asyncio library for PHP, providing seamless and efficient coroutines via PHP fibers",
             "support": {
                 "issues": "https://github.com/phasync/phasync/issues",
-                "source": "https://github.com/phasync/phasync/tree/2.0.0"
+                "source": "https://github.com/phasync/phasync/tree/2.0.7"
             },
-            "time": "2026-10-19T14:52:01+00:00"
+            "time": "2026-10-30T09:46:00+00:00"
         },
         {
             "name": "psr/http-factory",
